@@ -3975,7 +3975,7 @@ async function enterGame(remoteSave,joined){
   if(lastChat) onChat(lastChat);
   $('#clanTitle').textContent=Net.clan.name;
   $('#clanInvite').textContent=Net.clan.locked?'New players find this clan in the list when they sign in, and need the clan password to join.':'New players can find and join this clan from the list when they sign in.';
-  $('#gate').hidden=true; $('#app').hidden=false; started=true;
+  $('#gate').hidden=true; $('#app').hidden=false; started=true; earnAt=Date.now();
   renderPanel(); renderFeed();
   if(S.shook) $('#hint').classList.add('gone');
   saveRemote(); publish(true);
@@ -3987,14 +3987,16 @@ let itemsT=null; function renderItemsSoon(){clearTimeout(itemsT); itemsT=setTime
 let goalT=null; function goalSoon(){clearTimeout(goalT); goalT=setTimeout(()=>{if(tab==='clan') renderGoal()},400)}
 setInterval(()=>{if(started){checkGoal(); processEndedRaids(); updateRaidBanner(); if(tab==='clan'){renderGoal(); renderRaidBox()} if(tab==='hearth') renderHearth()}},15000);
 
-let lastT=performance.now(), saveT=0, TH=0;
+let lastT=performance.now(), saveT=0, TH=0, earnAt=Date.now();
 function frame(now){
   const dt=Math.min(0.05,(now-lastT)/1000); lastT=now; const t=now/1000;
   if(!started){ if(!$('#gate').hidden) drawGate(t,dt); requestAnimationFrame(frame); return }
-  earn(rate()*dt);
+  // snow follows the real clock, so it keeps falling while the tab is in the background
+  {const nowMs=Date.now(), el=Math.min(Math.max(0,(nowMs-earnAt)/1000),BAL.offlineCapH*3600); earnAt=nowMs;
+   const gain=rate()*el; earn(gain); S.dirt=Math.min(1,(S.dirt||0)+el/(BAL.dirtHours*3600));
+   if(el>60) toast(`Snow kept falling while you were away. +${fmt(gain)} snow`)}
   stepView(mainView,dt,flakeN(S.globe.s),t);
   if(tab==='hearth'){drawHearth(t,dt); hearthPresence()} else drawStage(t,dt);
-  S.dirt=Math.min(1,(S.dirt||0)+dt/(BAL.dirtHours*3600));
   trackActive(dt); TH=(TH||0)+dt; if(TH>2){TH=0; updateTryhard()}
   if(END.on) drawEnding(t,dt);
   if(RS.open){raidStep(dt); drawRaid(t,dt)}
