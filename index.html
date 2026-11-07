@@ -34,7 +34,7 @@ body{background:var(--bg);color:var(--ink);font:16px/1.45 'Nunito Sans',system-u
 #globe{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:grab;outline:none}
 #globe:active{cursor:grabbing}
 #globe:focus-visible{box-shadow:inset 0 0 0 3px #cfe3f0}
-.hud{position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:18px 22px;pointer-events:none;color:#f3ead8}
+.hud{text-shadow:0 1px 4px rgba(0,0,0,.75);position:absolute;left:0;right:0;top:0;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;padding:18px 22px;pointer-events:none;color:#f3ead8}
 .hud h1{font:600 clamp(22px,3vw,34px)/1.08 'Fraunces',Georgia,serif;margin:0}
 .hud .sub{font-size:13px;color:#b9b3c8;margin-top:5px}
 .hud .vis{font-size:13px;color:#f2d58c;margin-top:3px}
@@ -89,8 +89,10 @@ input[type=text],input[type=password]{flex:1;min-width:0;font:15px 'Nunito Sans'
 .won{color:var(--ok);font-weight:700}
 .raidbanner{position:absolute;left:50%;transform:translateX(-50%);bottom:52px;background:#b3202b;color:#fff3e8;border:0;border-radius:999px;padding:12px 20px;font:700 15px 'Nunito Sans',sans-serif;cursor:pointer;box-shadow:0 8px 24px rgba(180,30,40,.45);animation:pulse 1.4s ease-in-out infinite;max-width:calc(100% - 32px)}
 .raidbanner[hidden]{display:none}
+.backbtn{position:absolute;left:50%;transform:translateX(-50%);bottom:16px;background:rgba(20,16,30,.75);color:#f3ead8;border:1px solid rgba(255,255,255,.25);border-radius:999px;padding:10px 18px;font:700 14px 'Nunito Sans',sans-serif;cursor:pointer}
+.backbtn[hidden]{display:none}
 @keyframes pulse{50%{box-shadow:0 8px 34px rgba(255,60,60,.8)}}
-.raidov{position:fixed;inset:0;z-index:35;background:#0b0d1e;user-select:none;-webkit-user-select:none;touch-action:none}
+.raidov{position:fixed;inset:0;z-index:35;background:#0b0d1e;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;touch-action:none;overscroll-behavior:none}
 .raidov[hidden]{display:none}
 #raidc,#endc{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
 #raidc{cursor:crosshair}
@@ -204,6 +206,7 @@ input[type=text],input[type=password]{flex:1;min-width:0;font:15px 'Nunito Sans'
     </div>
     <div class="hint" id="hint">Tap or drag the globe to shake it</div>
     <button class="raidbanner" id="raidBanner" hidden></button>
+    <button class="backbtn" id="backBtn" hidden>Back to my globe</button>
   </section>
   <aside class="drawer">
     <nav class="tabs" role="tablist">
@@ -219,7 +222,7 @@ input[type=text],input[type=password]{flex:1;min-width:0;font:15px 'Nunito Sans'
     <div class="pane hearthpane" id="pane-hearth" hidden>
       <h3>The hearth</h3>
       <p class="lead" id="hearthStatus"></p>
-      <div class="hacts"><button data-act="log">Add a log</button><button data-act="pour">Pour mulled wine</button><button data-act="cheers">Cheers</button></div>
+      <div class="hacts"><button data-act="log">Add a log</button><button data-act="pour">Pour mulled wine</button><button data-act="cheers">Cheers</button><button data-act="move" id="moveBtn">Do your move</button></div>
       <div class="pourpick" id="pourPick" hidden></div>
       <ul class="chat" id="chatList"></ul>
       <div class="inrow"><input type="text" id="chatIn" maxlength="200" placeholder="Say something by the fire" aria-label="Chat message"><button data-act="say">Send</button></div>
@@ -304,13 +307,13 @@ const BAL = {
   poolGround:5, poolSky:2, clanMax:12,
   // the hearth: each log burns logBurnMin (stacking up to fireMaxHours), a mug lasts mugMinutes,
   // sitting by a lit stove gives warmBonus
-  logBurnMin:45, fireMaxHours:3, mugMinutes:15, logGapMin:20, pourGapMin:5, warmBonus:0.1,
+  logBurnMin:45, fireMaxHours:3, moveGapSec:15, mugMinutes:15, logGapMin:20, pourGapMin:5, warmBonus:0.1,
   // cursed relics: chance per roll, and a guarantee after this many rolls
   omenShake:0.03, omenReceived:0.05, omenPart:0.06, omenSeal:0.5, omenPity:45,
   // weekly clan goal: everyone must finish every task
   // raids and broken glass
   raidCooldownH:6, raidMinutes:10, raidHpPerMember:1500, raidMinTaps:40, raidRewardHours:3, raidOmen:0.3,
-  raidSmashEvery:18, raidWindupMs:2600, raidBlockTaps:12, raidTapCap:14,
+  raidSmashEvery:18, raidWindupMs:2600, raidBlockTaps:12, raidTapCap:20,
   crackPenalty:0.10, maxCracks:3,
   // dirty glass: fully grimy after dirtHours, costs up to dirtPenalty; wipeDist = globe radii of rubbing to clean fully
   dirtHours:30, dirtPenalty:0.3, wipeDist:25,
@@ -1544,7 +1547,9 @@ function processRaid(r,hits,live){
   const win=total>=r.hp, B=BOSSES[r.boss]||BOSSES.yeti, took=mine>=BAL.raidMinTaps;
   let gain=0, loot=null, lines=[];
   if(took) goalTick('raid');
+  const hadCracks=(S.globe.cr||0)>0;
   if(win){
+    if(hadCracks){S.globe.cr=0; lines.push('whole glass again')}
     if(took){
       gain=Math.max(50,rate()*3600*BAL.raidRewardHours); earn(gain); lines.push(`+${fmt(gain)} snow`);
       if(!S.own.includes(B.loot)){S.pool.push(B.loot); S.own.push(B.loot); loot=B.loot; lines.push(`the ${ITEMS[B.loot].n}`)}
@@ -1559,9 +1564,9 @@ function processRaid(r,hits,live){
   if(r.by===Net.user.uid&&live) Net.send({type:win?'raidwin':'raidlose',item:r.boss});
   renderPanel(); saveSoon(); publish(true);
   const title=win?`${B.n} is down!`:`${B.n} broke through`;
-  const body=win?(took?`The clan beat it. You get ${lines.join(' and ')}.`:`The clan beat it, but you tapped fewer than ${BAL.raidMinTaps} times, so there’s no reward for you this time.`)
-    :`It wasn’t beaten in time, so every globe in the clan got a crack (−${Math.round(BAL.crackPenalty*100)}% snow each). Tap your globe to mend it.${lines.length?' You get '+lines.join(' and ')+'.':''}`;
-  return {win,title,body,short:`${title}. ${win?(took?'You get '+lines.join(' and ')+'.':'You weren’t there for the reward.'):'Your glass cracked. Tap your globe to mend it.'}`};
+  const body=win?(took?`The clan beat it. You get ${lines.join(' and ')}.`:hadCracks?`The clan beat it and your glass is whole again. You tapped fewer than ${BAL.raidMinTaps} times, so there’s no other reward this time.`:`The clan beat it, but you tapped fewer than ${BAL.raidMinTaps} times, so there’s no reward for you this time.`)
+    :`It wasn’t beaten in time, so every globe in the clan got a crack (−${Math.round(BAL.crackPenalty*100)}% snow each). The glass stays broken until the clan beats a raid boss.${lines.length?' You get '+lines.join(' and ')+'.':''}`;
+  return {win,title,body,short:`${title}. ${win?(took?'You get '+lines.join(' and ')+'.':'You weren’t there for the reward.'):'Your glass cracked. It stays broken until the clan beats a raid boss.'}`};
 }
 function summonRaid(){
   if(!canSummon()) return;
@@ -1685,17 +1690,13 @@ function renderRaidBox(){
   let h='<div class="goal"><h3>Raids</h3>';
   if(a&&S.raidDone[a.id]&&!S.raidDone[a.id].pending) h+='<p class="lead">You’ve already finished this raid.</p>';
   else if(a) h+=`<p class="lead"><b>${BOSSES[a.boss].n}</b> is attacking, summoned by ${esc(a.by===Net.user.uid?'you':a.byName)}. ${dur(a.end-Date.now())} left.</p><button class="big" data-act="joinraid">Join the raid</button>`;
-  else if(canSummon()) h+=`<p class="lead">Summon a boss and the whole clan has ${BAL.raidMinutes} minutes to tap it down together. Its health grows with the size of the clan. If it survives, every globe in the clan cracks, including the globes of anyone who didn’t show up. Message your clan before you start.</p><button class="big" data-act="summon">Summon a raid</button>`;
+  else if(canSummon()) h+=`<p class="lead">Summon a boss and the whole clan has ${BAL.raidMinutes} minutes to tap it down together. Its health grows with the size of the clan. If it survives, every globe in the clan cracks, including the globes of anyone who didn’t show up, and stays cracked until the clan beats a boss. Message your clan before you start.</p><button class="big" data-act="summon">Summon a raid</button>`;
   else h+=`<p class="lead">The next raid can be summoned in ${dur(slotEnd-Date.now())}.</p>`;
   const last=RAIDS.find(r=>r.end<=Date.now()&&S.raidDone[r.id]&&!S.raidDone[r.id].pending);
   if(last) h+=`<p class="note">Last raid: ${BOSSES[last.boss].n}, ${S.raidDone[last.id].win?'<span class="won">beaten</span>':'not beaten'}.</p>`;
   box.innerHTML=h+'</div>';
 }
-function mendTap(){
-  if(!(S.globe.cr>0)) return;
-  S.mend=(S.mend||0)+1;
-  if(S.mend>=BAL.mendTaps){S.mend=0; S.globe.cr--; mainView.flash=0.8; toast(S.globe.cr?`Crack mended. ${S.globe.cr} left.`:'Your glass is whole again.'); renderPanel(); saveSoon(); publish(true)}
-}
+function mendTap(){}
 
 const VISITORS={
   robin:{n:'robin',draw:(c,t)=>robin(c,0,0,2.4,t)}, bunny:{n:'bunny',draw:drBunny}, fox:{n:'fox',draw:drFox}, penguin:{n:'penguin',draw:drPenguin}
@@ -1899,13 +1900,13 @@ function drawEnding(t,dt){
 }
 function rebirth(){
   const special=S.own.filter(k=>ITEMS[k]&&(ITEMS[k].cursed||ITEMS[k].clan||ITEMS[k].raid||ITEMS[k].legacy));
-  const keep={glit:S.glit,gl:S.gl,cursed:S.cursed,wins:S.wins,blessUntil:S.blessUntil,partUntil:S.partUntil,goal:S.goal,lim:S.lim,claimed:S.claimed,raidDone:S.raidDone,firstAt:S.firstAt,shook:true,
+  const keep={bg:S.bg,bgs:S.bgs,glit:S.glit,gl:S.gl,cursed:S.cursed,wins:S.wins,blessUntil:S.blessUntil,partUntil:S.partUntil,goal:S.goal,lim:S.lim,claimed:S.claimed,raidDone:S.raidDone,firstAt:S.firstAt,shook:true,
     legacy:(S.legacy||0)+1,lives:[...(S.lives||[]),{sealed:S.sealed.length,total:S.total,end:Date.now()}].slice(-10),lifeStart:Date.now()};
   const n=fresh(Net.members); Object.assign(n,keep);
   n.isNew=false; n.ended=false;
   n.own=[...new Set([...special,'sleepcat'])];
   n.pool=[...n.pool,...n.own.filter(k=>!n.pool.includes(k))];
-  n.globe.eq={L:'sleepcat',R:null,S:null};
+  n.globe.eq={L:'sleepcat',R:null,S:null}; n.globe.cr=S.globe.cr||0;
   S=n; END.on=false; $('#ending').hidden=true; document.body.style.overflow='';
   renderPanel(); saveRemote(); publish(true);
   ov={mode:'intro',v:newView()}; ov.v.swirl=1.2;
@@ -1947,16 +1948,98 @@ function mugHolders(){
 function lastCheers(){const c=CHAT.find(x=>x.kind==='cheers'); return c?c.at:0}
 function warmNow(){return tab==='hearth'&&!document.hidden&&fireLevel()>0}
 
+
+/* ---------- Hearth moves: everyone at the hearth gets a random move ---------- */
+const MOVES={
+  backflip:{n:'Backflip',past:'did a backflip',dur:1.4},
+  napcat:{n:'Nap with the cat',past:'curled up with the cat',dur:7},
+  dance:{n:'Dance',past:'busted some moves',dur:4},
+  juggle:{n:'Juggle snowballs',past:'juggled snowballs',dur:4.5},
+  spin:{n:'Spin',past:'spun like a top',dur:2},
+  chug:{n:'Chug the wine',past:'chugged a whole mug',dur:3.2},
+  faint:{n:'Faint dramatically',past:'fainted dramatically',dur:4},
+  warm:{n:'Warm your bum',past:'warmed their bum at the stove',dur:4.5},
+  snowball:{n:'Throw a snowball',past:'threw a snowball',dur:2.2},
+  sneeze:{n:'Sneeze',past:'sneezed their hat off',dur:3},
+  sing:{n:'Sing a carol',past:'sang a carol',dur:5},
+  headstand:{n:'Headstand',past:'did a headstand',dur:4},
+  hiccup:{n:'Hiccups',past:'got the hiccups',dur:4}
+};
+const MOVE_KEYS=Object.keys(MOVES);
+const sm=u=>u<0?0:u>1?1:u*u*(3-2*u);
+function chooseMove(){
+  const taken=new Set(Net.members.filter(m=>m.id!==Net.user.uid&&m.hearth&&Date.now()-m.hearth<75000&&m.hmove).map(m=>m.hmove));
+  const avail=MOVE_KEYS.filter(k=>!taken.has(k)&&k!==S.hmove);
+  S.hmove=pick(avail.length?avail:MOVE_KEYS);
+}
+function moveFX(mv,a,x,y,st){
+  const e=mv.el, u=Math.min(1,e/mv.dur), f={tx:0,ty:0,rot:0,sx:1};
+  const inout=(i,o)=>sm(Math.min(1,e/i))*(1-sm(Math.max(0,(e-(mv.dur-o))/o)));
+  switch(mv.id){
+    case 'backflip': f.ty=-Math.sin(Math.PI*u)*a*3; f.rot=-TAU*sm(u); break;
+    case 'napcat': {const k=inout(0.8,0.8); f.tx=(st.cat.x-x-a*1.4)*k; f.ty=(st.cat.y-y-a*0.6)*k; f.rot=-Math.PI/2*k; f.sleep=k>0.9; break}
+    case 'dance': f.tx=Math.sin(e*9)*a*0.35; f.rot=Math.sin(e*9)*0.25; f.ty=-Math.abs(Math.sin(e*9))*a*0.3; f.notes=1; break;
+    case 'juggle': f.balls=1; f.ty=-Math.abs(Math.sin(e*6))*a*0.1; break;
+    case 'spin': {let c2=Math.cos(e*TAU*1.5); if(Math.abs(c2)<0.08) c2=0.08*(c2<0?-1:1); f.sx=c2; break}
+    case 'chug': f.mug=true; f.raise=1; f.rot=-0.3*Math.sin(Math.PI*Math.min(1,e/2.2)); if(e>2.3) f.say='Ahhh!'; break;
+    case 'faint': {const k=inout(0.5,0.6); f.rot=Math.PI/2*k; f.tx=a*0.9*k; f.ty=a*0.7*k; f.stars=k>0.8; if(e<0.6) f.say='Oh no…'; break}
+    case 'warm': {const k=inout(0.8,0.8); f.tx=(st.stove.x-x)*0.6*k; f.ty=(st.stove.y-y)*0.6*k; f.rot=Math.sin(e*12)*0.14*k; f.steam=k>0.8; break}
+    case 'snowball': f.rot=e<0.4?-0.35*e/0.4:e<0.6?0.35:0; f.throw=1; break;
+    case 'sneeze': {
+      if(e<1){f.sx=1-0.08*Math.sin(e*8); f.ty=a*0.12*e} else if(e<1.35){f.ty=-a*0.4*Math.sin((e-1)/0.35*Math.PI)}
+      if(e>=1&&e<2) f.say='ACHOO!';
+      const h=Math.max(0,e-1); if(h>0&&e<2.7){f.hatDy=h<0.6?h/0.6*a*3:a*3-(h-0.6)/1.1*a*3; f.hatRot=h*5}
+      break}
+    case 'sing': f.talk=true; f.notes=1; f.ty=-Math.abs(Math.sin(e*4))*a*0.1; if(e<1.5) f.say='♪ Jingle bells…'; break;
+    case 'headstand': {const k=inout(0.6,0.6); f.rot=Math.PI*k; f.ty=-a*1.3*k; f.tx=Math.sin(e*5)*a*0.08*k; break}
+    case 'hiccup': {const ph=e%0.8; f.ty=ph<0.15?-a*0.5*Math.sin(ph/0.15*Math.PI):0; if(ph<0.45&&e<mv.dur-0.3) f.say='hic!'; break}
+  }
+  return f;
+}
+function moveExtras(c,x,y,a,mv,t,f,st){
+  const e=mv.el;
+  if(f.sleep){
+    c.strokeStyle='rgba(235,240,255,0.9)'; c.lineWidth=Math.max(1.5,a*0.07); c.lineJoin='miter';
+    for(let k=0;k<3;k++){const ph=((t*0.4)+k/3)%1, sz=a*(0.25+k*0.1), zx=x+f.tx+a*(0.4+ph*0.8), zy=y+f.ty-a*(1.2+ph*1.4); c.globalAlpha=Math.sin(ph*Math.PI); c.beginPath(); c.moveTo(zx,zy); c.lineTo(zx+sz,zy); c.lineTo(zx,zy+sz); c.lineTo(zx+sz,zy+sz); c.stroke()}
+    c.globalAlpha=1;
+  }
+  if(f.notes) for(let i=0;i<3;i++){
+    const ph=((e*0.7)+i/3)%1, nx=x+f.tx+a*(0.9+ph*0.8)*(i%2?1:-1), ny=y-a*(1.8+ph*2);
+    c.globalAlpha=1-ph; c.fillStyle='#ffd27a'; ell(c,nx,ny,a*0.15,a*0.11,-0.4); c.fillRect(nx+a*0.11,ny-a*0.55,a*0.05,a*0.55); c.globalAlpha=1;
+  }
+  if(f.balls) for(let i=0;i<3;i++){
+    const ph=(e*1.4+i/3)%1, bx=x+Math.cos(ph*TAU)*a*0.75, by=y-a*2.3-Math.abs(Math.sin(ph*TAU))*a*1.3;
+    c.fillStyle='#ffffff'; dot(c,bx,by,a*0.2); c.fillStyle='rgba(150,180,220,0.45)'; dot(c,bx+a*0.06,by+a*0.06,a*0.11);
+  }
+  if(f.stars) for(let i=0;i<4;i++){
+    const ang=t*4+i*TAU/4, px=x+f.tx+Math.cos(ang)*a*0.9, py=y+f.ty-a*1.1+Math.sin(ang)*a*0.3;
+    c.fillStyle='#ffd23a'; c.beginPath(); for(let j=0;j<10;j++){const aa=-Math.PI/2+j*Math.PI/5, r2=j%2?a*0.07:a*0.17; c.lineTo(px+Math.cos(aa)*r2,py+Math.sin(aa)*r2)} c.closePath(); c.fill();
+  }
+  if(f.steam){
+    c.strokeStyle='rgba(255,220,180,0.5)'; c.lineWidth=Math.max(1.5,a*0.06);
+    for(let i=0;i<3;i++){const ph=((t*0.8)+i/3)%1, sxp=x+f.tx+(i-1)*a*0.4, syp=y+f.ty+a*0.6; c.globalAlpha=1-ph; c.beginPath(); c.moveTo(sxp,syp-ph*a*2); c.quadraticCurveTo(sxp+a*0.2,syp-ph*a*2-a*0.3,sxp,syp-ph*a*2-a*0.6); c.stroke()}
+    c.globalAlpha=1;
+  }
+  if(f.throw&&st.target){
+    const k=Math.max(0,Math.min(1,(e-0.45)/0.9));
+    if(k>0&&k<1){const bx=x+(st.target.x-x)*k, by=(y-a*1.2)+((st.target.y-a*0.8)-(y-a*1.2))*k-Math.sin(k*Math.PI)*a*3; c.fillStyle='#fff'; dot(c,bx,by,a*0.22)}
+    if(k>=1&&e<mv.dur){const s2=(e-1.35)/(mv.dur-1.35); c.fillStyle=`rgba(255,255,255,${1-s2})`; for(let i=0;i<8;i++){const aa=i*TAU/8; dot(c,st.target.x+Math.cos(aa)*a*(0.3+s2*0.9),st.target.y-a*0.8+Math.sin(aa)*a*(0.3+s2*0.9),a*0.12*(1-s2))}}
+  }
+}
+
 function drawAvatar(c,x,y,a,p,st){
   const k=hashStr(p.id), hat=HAT_COLS[k%HAT_COLS.length], skin=SKIN[(k>>>3)%SKIN.length], sw=SWEATER[(k>>>6)%SWEATER.length];
   const bob=reduceMotion?0:Math.sin(st.t*1.3+k)*a*0.03;
   c.save(); c.translate(x,y+bob);
   c.fillStyle='rgba(0,0,0,0.25)'; ell(c,0,a*1.55,a*1.3,a*0.28);
   c.fillStyle='#6a3f22'; rr(c,-a*1.1,a*1.05,a*2.2,a*0.45,a*0.15); c.fill();
+  const fx=st.mv?moveFX(st.mv,a,x,y,st):null;
+  if(fx&&fx.say&&!st.say){st.say=fx.say; st.sayA=1}
+  c.save(); if(fx){c.translate(fx.tx,fx.ty); c.rotate(fx.rot); c.scale(fx.sx,1)}
   const torso=()=>{c.beginPath(); c.moveTo(-a*0.95,a*1.15); c.quadraticCurveTo(-a*1.05,a*0.2,-a*0.55,-a*0.05); c.lineTo(a*0.55,-a*0.05); c.quadraticCurveTo(a*1.05,a*0.2,a*0.95,a*1.15); c.closePath()};
   c.fillStyle=sw; torso(); c.fill(); c.fillStyle=lg(c,-a,0,a,0,[[0,'rgba(255,255,255,0.12)'],[1,'rgba(0,0,0,0.3)']]); torso(); c.fill();
   c.fillStyle='rgba(255,255,255,0.18)'; for(let i=0;i<3;i++) c.fillRect(-a*0.8,a*(0.35+i*0.22),a*1.6,a*0.05);
-  const mug=st.mug, raise=st.cheers?Math.min(1,st.cheers):0;
+  const mug=st.mug||(fx&&fx.mug), raise=fx&&fx.raise!=null?fx.raise:(st.cheers?Math.min(1,st.cheers):0);
   if(mug){
     const mx=raise?a*0.55:0, my=raise?-a*0.9:a*0.45;
     c.strokeStyle=sw; c.lineWidth=a*0.32; c.lineCap='round';
@@ -1977,12 +2060,16 @@ function drawAvatar(c,x,y,a,p,st){
   const bl=Math.sin(st.t*0.9+k)>0.97?0.15:1;
   c.fillStyle='#2a1a14'; ell(c,-a*0.2,-a*0.58,a*0.07,a*0.09*bl); ell(c,a*0.2,-a*0.58,a*0.07,a*0.09*bl);
   c.strokeStyle='#2a1a14'; c.lineWidth=a*0.06; c.lineCap='round'; c.beginPath();
-  if(st.talk&&!reduceMotion&&Math.sin(st.t*14)>0){c.fillStyle='#5a2020'; ell(c,0,-a*0.33,a*0.11,a*0.08)} else c.arc(0,-a*0.4,a*0.16,0.2,Math.PI-0.2);
+  if((st.talk||(fx&&fx.talk))&&!reduceMotion&&Math.sin(st.t*14)>0){c.fillStyle='#5a2020'; ell(c,0,-a*0.33,a*0.11,a*0.08)} else c.arc(0,-a*0.4,a*0.16,0.2,Math.PI-0.2);
   c.stroke();
+  if(fx&&fx.hatDy){c.save(); c.translate(0,-fx.hatDy); c.rotate(fx.hatRot||0)}
   c.fillStyle=hat; c.beginPath(); c.moveTo(-a*0.62,-a*0.7); c.quadraticCurveTo(-a*0.6,-a*1.45,0,-a*1.5); c.quadraticCurveTo(a*0.6,-a*1.45,a*0.62,-a*0.7); c.closePath(); c.fill();
   c.fillStyle='rgba(255,255,255,0.85)'; rr(c,-a*0.66,-a*0.82,a*1.32,a*0.2,a*0.1); c.fill();
   c.fillStyle='#f4efe4'; dot(c,0,-a*1.52,a*0.18);
+  if(fx&&fx.hatDy) c.restore();
   c.restore();
+  c.restore();
+  if(fx) moveExtras(c,x,y+bob,a,st.mv,st.t,fx,st);
   c.font=`700 ${Math.max(10,Math.round(a*0.42))}px "Nunito Sans", sans-serif`; c.textAlign='center'; c.textBaseline='top';
   const w=c.measureText(p.name).width+12;
   c.fillStyle=p.me?'rgba(255,210,122,0.92)':'rgba(20,16,24,0.6)'; rr(c,x-w/2,y+a*1.62,w,a*0.62,a*0.3); c.fill();
@@ -2054,10 +2141,14 @@ function drawHearth(t,dt){
   const SEATS=[[-0.27,0.03],[0.27,0.03],[-0.4,0.13],[0.4,0.13],[-0.17,0.2],[0.17,0.2],[-0.47,0.26],[0.47,0.26],[-0.33,0.3],[0.33,0.3],[-0.07,0.33],[0.07,0.33]];
   const a=s*0.05;
   const placed=ppl.map((p,i)=>({p,x:sx+SEATS[i][0]*s,y:floorY+SEATS[i][1]*s})).sort((u,v)=>u.y-v.y);
+  const catPos={x:sx+sw*0.85,y:sb+s*0.04}, stovePos={x:sx,y:sb+s*0.05};
   for(const {p,x,y} of placed){
+    const mvMsg=CHAT.find(m=>m.kind==='move'&&m.from===p.id&&MOVES[m.text]&&now-m.at<MOVES[m.text].dur*1000);
+    const mv=mvMsg?{id:mvMsg.text,el:(now-mvMsg.at)/1000,dur:MOVES[mvMsg.text].dur}:null;
+    let target=null; if(mv&&mv.id==='snowball'){const others=placed.filter(o=>o.p.id!==p.id); if(others.length){const o=others[hashStr(mvMsg.id||String(mvMsg.at))%others.length]; target={x:o.x,y:o.y}}}
     const msg=CHAT.find(m=>m.kind==='msg'&&m.from===p.id&&now-m.at<9000);
     const mug=!!held[p.id], cheers=mug&&ch<3500?Math.sin(Math.min(1,ch/600)*Math.PI/2):0;
-    drawAvatar(c,x,y,a,p,{t,mug,cheers,say:msg?msg.text:(cheers&&ch<2500?'Cheers!':''),sayA:msg?Math.min(1,(9000-(now-msg.at))/1200):1,talk:!!msg&&now-msg.at<2500});
+    drawAvatar(c,x,y,a,p,{t,mug,cheers,say:msg?msg.text:(cheers&&ch<2500?'Cheers!':''),sayA:msg?Math.min(1,(9000-(now-msg.at))/1200):1,talk:!!msg&&now-msg.at<2500,mv,cat:catPos,stove:stovePos,target});
     if(!p.me) hearthRegions.push({x:x-a*1.2,y:y-a*1.6,w:a*2.4,h:a*3.4,act:'pourfor',id:p.id});
   }
   if(!lit){c.fillStyle='rgba(243,234,216,0.9)'; c.font=`600 ${Math.round(s*0.035)}px Fraunces, Georgia, serif`; c.textAlign='center'; c.textBaseline='alphabetic'; c.fillText('The fire went out. Tap the stove to add a log.',W/2,H*0.97)}
@@ -2068,11 +2159,12 @@ function hearthTap(x,y){
 }
 function hearthAct(kind,to){
   const now=Date.now(); S.lim.hearth=S.lim.hearth||{};
-  const L=S.lim.hearth, gap={log:BAL.logGapMin,pour:BAL.pourGapMin,cheers:1}[kind]*60000, wait=gap-(now-(L[kind]||0));
-  if(wait>0){toast(kind==='log'?`You added a log recently. Try again in ${dur(wait)}.`:kind==='pour'?`Let the last mug go round first. Pour again in ${dur(wait)}.`:'Give it a moment before the next cheers.'); return}
+  const L=S.lim.hearth, gap={log:BAL.logGapMin,pour:BAL.pourGapMin,cheers:1,move:BAL.moveGapSec/60}[kind]*60000, wait=gap-(now-(L[kind]||0));
+  if(wait>0){toast(kind==='move'?'Catch your breath first.':kind==='log'?`You added a log recently. Try again in ${dur(wait)}.`:kind==='pour'?`Let the last mug go round first. Pour again in ${dur(wait)}.`:'Give it a moment before the next cheers.'); return}
   if(kind==='cheers'&&!mugHolders()[Net.user.uid]){toast('Pour yourself some mulled wine first.'); return}
   L[kind]=now;
   const m=to&&to!==Net.user.uid?member(to):null;
+  if(kind==='move'){if(!S.hmove) chooseMove(); Net.sendChat({kind:'move',text:S.hmove}); renderHearth(); return}
   Net.sendChat({kind,to:m?m.id:(kind==='pour'?Net.user.uid:''),toName:m?m.name:''});
   if(kind==='log') toast('You added a log. The fire crackles.');
   pourPick=false; renderHearth(); saveSoon();
@@ -2083,11 +2175,13 @@ function chatLine(cm){
   if(cm.kind==='log') return `<i>${f} added a log to the stove</i>`;
   if(cm.kind==='pour') return cm.to&&cm.to!==cm.from?`<i>${f} poured mulled wine for ${cm.to===me?'you':esc(cm.toName)}</i>`:`<i>${f} poured a mug of mulled wine</i>`;
   if(cm.kind==='cheers') return `<i>${f} raised a mug. Cheers!</i>`;
+  if(cm.kind==='move'&&MOVES[cm.text]) return `<i>${f} ${cm.from===me?MOVES[cm.text].past.replace('their','your'):MOVES[cm.text].past}</i>`;
   return '';
 }
 function renderHearth(){
   if(!S) return;
   const fl=fireLevel(), left=fireUntil()-Date.now(), ppl=hearthPresent().length;
+  if(S.hmove&&MOVES[S.hmove]) $('#moveBtn').textContent=MOVES[S.hmove].n;
   $('#hearthStatus').textContent=(fl>0?`The fire burns for another ${dur(left)}. `:'The fire is out. ')+`${ppl} ${ppl===1?'person':'people'} by the stove.`+(fl>0?` Sitting here keeps you warm: +${Math.round(BAL.warmBonus*100)}% snow.`:'');
   const ul=$('#chatList'), atBottom=ul.scrollHeight-ul.scrollTop-ul.clientHeight<40;
   ul.innerHTML=CHAT.slice().reverse().map(cm=>`<li>${chatLine(cm)}<small>${ago(cm.at)}</small></li>`).join('')||'<li><i>It’s quiet. Say hello or add a log to the stove.</i></li>';
@@ -2118,7 +2212,7 @@ let presenceAt=0;
 function hearthPresence(){
   if(tab!=='hearth'||document.hidden) return;
   if(Date.now()-presenceAt<30000) return;
-  presenceAt=Date.now(); Net.setPresence(presenceAt);
+  presenceAt=Date.now(); Net.setPresence(presenceAt,S.hmove||'');
 }
 
 /* =========================================================
@@ -2290,6 +2384,107 @@ function roomBackdrop(c,W,H,cx,surf,R){
 }
 
 /* =========================================================
+   BACKGROUNDS behind your globe (also shown in the clan cabinet)
+   ========================================================= */
+const BGS=[
+  {id:'room',n:'Cozy room',cost:0},{id:'window',n:'Snowy window',cost:0},{id:'market',n:'Christmas market',cost:4000},
+  {id:'library',n:'Old library',cost:15000},{id:'aurora',n:'Northern lights',cost:45000},{id:'icecave',n:'Ice cave',cost:120000}
+];
+const BGMAP=Object.fromEntries(BGS.map(b=>[b.id,b]));
+const BOOKS=(()=>{const r=rng(31337),a=[]; for(let i=0;i<220;i++) a.push({w:0.012+r()*0.02,h:0.6+r()*0.35,c:['#7a2a2a','#2a4a6a','#2f5a3a','#8a6a2a','#5a3a6a','#a0522d','#3a3a3a','#6a5a3a'][Math.floor(r()*8)],t:r()<0.08}); return a})();
+const BULBS2=(()=>{const r=rng(999),a=[]; for(let i=0;i<60;i++) a.push({c:BULBS[i%4],ph:r()*TAU}); return a})();
+const CRYST=(()=>{const r=rng(4040),a=[]; for(let i=0;i<14;i++) a.push({x:r(),s:0.4+r()*0.8,h:r()}); return a})();
+function surfacePlank(c,W,H,surf,top,bot,edge){
+  c.fillStyle=lg(c,0,surf,0,H,[[0,top],[0.06,bot],[1,'#0e0a08']]); c.fillRect(0,surf,W,H-surf);
+  c.fillStyle=edge; c.fillRect(0,surf,W,1.5);
+}
+function drawBackdrop(c,W,H,cx,surf,R,bg,t){
+  bg=BGMAP[bg]?bg:'room';
+  if(bg==='room') return roomBackdrop(c,W,H,cx,surf,R);
+  if(bg==='window'){
+    c.fillStyle=lg(c,0,0,0,H,[[0,'#3a2632'],[1,'#1e1418']]); c.fillRect(0,0,W,H);
+    const ww=Math.min(W*0.8,R*4.2), wx=cx-ww/2, wy=Math.max(8,surf-R*3.2), wh=surf-wy-6;
+    c.fillStyle=lg(c,0,wy,0,wy+wh,[[0,'#0a1230'],[0.7,'#1f3466'],[1,'#3a5288']]); c.fillRect(wx,wy,ww,wh);
+    c.save(); c.beginPath(); c.rect(wx,wy,ww,wh); c.clip();
+    glow(c,wx+ww*0.78,wy+wh*0.22,R*0.7,'255,240,205',0.35); c.fillStyle='#f6efd8'; dot(c,wx+ww*0.78,wy+wh*0.22,R*0.16);
+    c.fillStyle='#dfe8f5'; c.beginPath(); c.ellipse(wx+ww*0.5,wy+wh*1.08,ww*0.7,wh*0.22,0,0,TAU); c.fill();
+    c.fillStyle='rgba(18,28,58,0.9)'; for(let i=0;i<9;i++){const x=wx+ww*(0.05+i*0.11), h2=wh*(0.12+((i*37)%5)*0.03); c.beginPath(); c.moveTo(x-h2*0.3,wy+wh*0.92); c.lineTo(x,wy+wh*0.92-h2); c.lineTo(x+h2*0.3,wy+wh*0.92); c.fill()}
+    c.fillStyle='rgba(255,255,255,0.85)'; for(let i=0;i<50;i++){const fx=wx+((i*0.618+Math.sin(t*0.3+i)*0.01)%1)*ww, fy=wy+(((i*0.37)+t*0.04*(0.6+(i%5)*0.15))%1)*wh; dot(c,fx,fy,1+(i%3)*0.6)}
+    c.restore();
+    c.strokeStyle='#5a3a22'; c.lineWidth=Math.max(6,R*0.06); c.strokeRect(wx,wy,ww,wh);
+    c.lineWidth=Math.max(3,R*0.03); c.beginPath(); c.moveTo(cx,wy); c.lineTo(cx,wy+wh); c.moveTo(wx,wy+wh*0.5); c.lineTo(wx+ww,wy+wh*0.5); c.stroke();
+    for(const sd of [-1,1]){c.fillStyle=lg(c,cx+sd*ww*0.5,0,cx+sd*ww*0.62,0,[[0,'#8a1e2a'],[1,'#4a0c14']]); c.beginPath(); c.moveTo(cx+sd*ww*0.46,wy-10); c.quadraticCurveTo(cx+sd*ww*0.56,wy+wh*0.5,cx+sd*ww*0.5,surf); c.lineTo(cx+sd*ww*0.68,surf); c.lineTo(cx+sd*ww*0.68,wy-10); c.closePath(); c.fill()}
+    surfacePlank(c,W,H,surf,'#efe7da','#b8ab96','rgba(255,255,255,0.6)');
+    return;
+  }
+  if(bg==='market'){
+    c.fillStyle=lg(c,0,0,0,H,[[0,'#0c1530'],[1,'#1e1a2e']]); c.fillRect(0,0,W,H);
+    for(const b of BOKEH){const x=b.x*W,y=b.y*surf; c.fillStyle=rg(c,x,y,0,x,y,b.r*1.3,[[0,`rgba(255,${b.warm?190:140},${b.warm?110:200},${b.a*1.6})`],[1,'rgba(0,0,0,0)']]); dot(c,x,y,b.r*1.3)}
+    c.fillStyle='rgba(30,22,40,0.95)';
+    for(let i=0;i<5;i++){const x=W*(0.1+i*0.2), w2=W*0.16, y=surf-R*1.6-((i*7)%3)*R*0.15; c.fillRect(x-w2/2,y,w2,surf-y); c.beginPath(); c.moveTo(x-w2*0.6,y); c.lineTo(x,y-R*0.5); c.lineTo(x+w2*0.6,y); c.fill();
+      c.fillStyle='rgba(255,190,110,0.5)'; c.fillRect(x-w2*0.35,y+R*0.25,w2*0.7,R*0.3); c.fillStyle='rgba(30,22,40,0.95)'}
+    for(let row=0;row<2;row++){
+      const y0=surf*(0.12+row*0.2);
+      for(let i=0;i<=30;i++){const u=i/30, x=u*W, y=y0+Math.sin(u*Math.PI)*surf*0.08, bb=BULBS2[(i+row*30)%BULBS2.length], a=0.6+0.4*Math.sin(t*2+bb.ph);
+        glow(c,x,y,R*0.12,bb.c,0.5*a); c.fillStyle=`rgb(${bb.c})`; dot(c,x,y,Math.max(1.5,R*0.018))}
+    }
+    surfacePlank(c,W,H,surf,'#8a5634','#5a3420','rgba(255,224,180,0.35)');
+    c.fillStyle='rgba(240,246,255,0.9)'; c.fillRect(0,surf-2,W,4);
+    return;
+  }
+  if(bg==='library'){
+    c.fillStyle=lg(c,0,0,0,H,[[0,'#16261e'],[1,'#0c1410']]); c.fillRect(0,0,W,H);
+    const sh=Math.max(40,R*0.55); let k=0;
+    for(let y=surf-sh;y>-sh;y-=sh){
+      c.fillStyle='#3a2414'; c.fillRect(0,y+sh-8,W,8);
+      let x=4;
+      while(x<W){const b=BOOKS[k++%BOOKS.length], bw=b.w*R*4.5, bh=(sh-12)*b.h;
+        if(b.t){c.save(); c.translate(x,y+sh-8); c.rotate(-0.25); c.fillStyle=b.c; c.fillRect(0,-bh,bw,bh); c.restore(); x+=bw*1.6; continue}
+        c.fillStyle=b.c; c.fillRect(x,y+sh-8-bh,bw,bh); c.fillStyle='rgba(255,220,150,0.25)'; c.fillRect(x+bw*0.2,y+sh-8-bh+bh*0.15,bw*0.6,2); x+=bw+1}
+    }
+    c.fillStyle='rgba(10,8,6,0.35)'; c.fillRect(0,0,W,H);
+    const ccx=W*0.14, ccy=surf-R*0.5; glow(c,ccx,ccy-R*0.25,R*1.4,'255,180,90',0.35+0.05*Math.sin(t*7));
+    c.fillStyle='#efe6d2'; c.fillRect(ccx-R*0.05,ccy-R*0.2,R*0.1,R*0.5); flame(c,ccx,ccy-R*0.2,R*0.035,R*0.14,t,3);
+    surfacePlank(c,W,H,surf,'#6a2a1a','#3a160c','rgba(255,200,150,0.3)');
+    return;
+  }
+  if(bg==='aurora'){
+    c.fillStyle=lg(c,0,0,0,H,[[0,'#040a1c'],[0.6,'#0f1f44'],[1,'#264a6e']]); c.fillRect(0,0,W,H);
+    for(const s2 of STARS){c.fillStyle=`rgba(255,253,240,${0.4+0.5*Math.sin(t*1.3+s2.ph)**2})`; dot(c,(s2.x*0.5+0.5)*W,(s2.y*0.5+0.5)*surf*0.9,1.2)}
+    c.save(); c.globalCompositeOperation='lighter';
+    const cols=['80,255,170','90,210,255','190,120,255'];
+    for(let b=0;b<3;b++){const yo=surf*(0.15+b*0.1), f=x=>yo+Math.sin(x/W*6+t*0.3+b)*surf*0.08;
+      c.beginPath(); for(let i=0;i<=40;i++){const x=i/40*W; i?c.lineTo(x,f(x)):c.moveTo(x,f(x))} for(let i=40;i>=0;i--){const x=i/40*W; c.lineTo(x,f(x)+surf*0.22)} c.closePath();
+      c.fillStyle=lg(c,0,yo-surf*0.05,0,yo+surf*0.3,[[0,`rgba(${cols[b]},0)`],[0.5,`rgba(${cols[b]},0.25)`],[1,`rgba(${cols[b]},0)`]]); c.fill()}
+    c.restore();
+    c.fillStyle='#1a2a4a'; c.beginPath(); c.moveTo(0,surf); for(let i=0;i<=8;i++) c.lineTo(i/8*W,surf-R*(0.4+((i*53)%7)*0.12)); c.lineTo(W,surf); c.fill();
+    c.fillStyle=lg(c,0,surf,0,H,[[0,'#eef4fd'],[1,'#9fb4d4']]); c.fillRect(0,surf,W,H-surf);
+    c.fillStyle='#5a3a22'; c.beginPath(); c.ellipse(cx,surf+R*0.02,R*1.0,R*0.12,0,0,TAU); c.fill(); c.fillStyle='#c99766'; c.beginPath(); c.ellipse(cx,surf-1,R*0.95,R*0.09,0,0,TAU); c.fill();
+    return;
+  }
+  // ice cave
+  c.fillStyle=lg(c,0,0,0,H,[[0,'#06142a'],[0.6,'#0f3a5e'],[1,'#1a5a7a']]); c.fillRect(0,0,W,H);
+  c.fillStyle='rgba(150,220,255,0.18)'; for(let i=0;i<6;i++){c.beginPath(); c.ellipse(W*(i/5),surf*0.55,W*0.18,surf*0.6,0,0,TAU); c.fill()}
+  c.fillStyle='rgba(200,240,255,0.85)';
+  for(let i=0;i<22;i++){const x=(i+0.5)/22*W, h2=surf*(0.08+((i*37)%7)*0.03); c.beginPath(); c.moveTo(x-W*0.018,0); c.lineTo(x,h2); c.lineTo(x+W*0.018,0); c.fill()}
+  for(const k2 of CRYST){const x=k2.x*W, s2=R*0.3*k2.s, y=surf;
+    glow(c,x,y-s2,s2*1.6,'120,230,255',0.3+0.1*Math.sin(t*2+k2.h*9));
+    c.fillStyle=lg(c,x-s2*0.3,0,x+s2*0.3,0,[[0,'#e8fbff'],[1,'#5ab8e0']]);
+    for(const [dx,hh,rot] of [[0,1,0],[-0.25,0.7,-0.3],[0.25,0.75,0.3]]){c.save(); c.translate(x+dx*s2,y); c.rotate(rot); c.beginPath(); c.moveTo(-s2*0.12,0); c.lineTo(-s2*0.12,-s2*hh); c.lineTo(0,-s2*hh*1.25); c.lineTo(s2*0.12,-s2*hh); c.lineTo(s2*0.12,0); c.fill(); c.restore()}}
+  c.fillStyle=lg(c,0,surf,0,H,[[0,'#cfefff'],[0.1,'#7ab8d8'],[1,'#123a5a']]); c.fillRect(0,surf,W,H-surf);
+  c.fillStyle='rgba(255,255,255,0.7)'; c.fillRect(0,surf,W,2);
+}
+const bgCache={};
+function backdropImage(bg,w,h,R){
+  const key=`${bg}|${Math.round(w)}|${Math.round(h)}`, d=Math.min(2,devicePixelRatio||1);
+  if(bgCache[key]) return bgCache[key];
+  const cv=document.createElement('canvas'); cv.width=Math.round(w*d); cv.height=Math.round(h*d);
+  const c=cv.getContext('2d'); c.scale(d,d); drawBackdrop(c,w,h,w/2,h,R,bg,0);
+  const keys=Object.keys(bgCache); if(keys.length>40) delete bgCache[keys[0]];
+  return bgCache[key]=cv;
+}
+
+/* =========================================================
    CLAN NETWORK: Firebase version and local demo version.
    Both expose the same methods so the game never cares which.
    ========================================================= */
@@ -2361,7 +2556,7 @@ function FireNet(){
     async getHits(id){const snap=await m.getDocs(m.collection(db,'clans',N.clan.id,'raids',id,'hits')); const o={}; snap.docs.forEach(d=>o[d.id]=d.data()); return o},
     chatListen(cb){m.onSnapshot(m.query(m.collection(db,'clans',N.clan.id,'chat'),m.orderBy('at','desc'),m.limit(60)),snap=>cb(snap.docs.map(d=>({id:d.id,...d.data()}))),e=>console.warn(e))},
     sendChat(d){return m.addDoc(m.collection(db,'clans',N.clan.id,'chat'),{kind:'msg',text:'',to:'',toName:'',...d,from:N.user.uid,fromName:N.user.name,at:Date.now()}).catch(e=>{console.warn(e); toast('Your message didn’t send. Check your connection.')})},
-    setPresence(at){return m.setDoc(m.doc(db,'clans',N.clan.id,'members',N.user.uid),{hearth:at},{merge:true}).catch(e=>console.warn(e))}
+    setPresence(at,mv){return m.setDoc(m.doc(db,'clans',N.clan.id,'members',N.user.uid),{hearth:at,hmove:mv||''},{merge:true}).catch(e=>console.warn(e))}
   };
   return N;
 }
@@ -2387,11 +2582,12 @@ function DemoNet(){
     const nowR=Date.now();
     if(nowR-(D.hearthAt||0)<75000){
       const here=D.mates.slice(0,3);
-      here.forEach(mt=>mt.hearth=nowR);
+      here.forEach((mt,i)=>{mt.hearth=nowR; if(!mt.hmove) mt.hmove=MOVE_KEYS[(i*4+3)%MOVE_KEYS.length]});
       if(Math.random()<0.045){
         const mt=pick(here), r=Math.random(), push=d=>{D.chat.unshift({id:'c'+Math.random().toString(36).slice(2),kind:'msg',text:'',to:'',toName:'',...d,from:mt.id,fromName:mt.name,at:nowR}); D.chat.length=Math.min(D.chat.length,60); ccb&&ccb(D.chat.slice())};
         const lines=['Brr, it’s freezing outside','Who wants more wine?','My snowman finally has a hat','Did anyone beat the Yeti yet?','Your globe is filthy, clean it','This fire is perfect','I just found blood rain. What.','The cat is watching me again','Add a log, it’s getting cold!','Egészségedre!','Who keeps shaking my globe?'];
-        if(r<0.55) push({kind:'msg',text:pick(lines)});
+        if(r<0.4) push({kind:'msg',text:pick(lines)});
+        else if(r<0.6) push({kind:'move',text:mt.hmove});
         else if(r<0.7&&fireLevel()<0.5) push({kind:'log'});
         else if(r<0.88){const tgt=pick([{id:N.user.uid,name:N.user.name},...here.map(x=>({id:x.id,name:x.name}))]); push({kind:'pour',to:tgt.id,toName:tgt.name})}
         else push({kind:'cheers'});
@@ -2482,12 +2678,12 @@ function fresh(members){
   const pool=[...rank('G').slice(0,BAL.poolGround),...rank('S').slice(0,BAL.poolSky)];
   return {v:2,flakes:0,total:0,globe:{th,p:1,s:0,b:0,k:0,eq:{L:null,R:null,S:null}},no:1,sealed:[],last:Date.now(),
     charges:BAL.shakeMax,chargeAt:Date.now(),pool,own:[],gifted:{},glit:['white'],gl:'white',
-    lim:{day:dayKey(),visits:0,gifts:0,shakes:{},noteAt:0},claimed:[],isNew:true,shook:false,cursed:makeCursed(),raidDone:{},firstAt:Date.now(),lifeStart:Date.now(),dirt:0,legacy:0};
+    lim:{day:dayKey(),visits:0,gifts:0,shakes:{},noteAt:0},claimed:[],isNew:true,shook:false,cursed:makeCursed(),raidDone:{},firstAt:Date.now(),lifeStart:Date.now(),dirt:0,legacy:0,bg:'room',bgs:['room','window']};
 }
 function fix(s){
   s.globe.eq=s.globe.eq||{L:null,R:null,S:null}; s.lim=s.lim||{day:dayKey(),visits:0,gifts:0,shakes:{},noteAt:0};
   s.lim.shakes=s.lim.shakes||{}; s.claimed=s.claimed||[]; s.gifted=s.gifted||{}; s.glit=s.glit||['white']; s.gl=s.gl||'white';
-  s.cursed=s.cursed||makeCursed(); s.raidDone=s.raidDone||{}; s.firstAt=s.firstAt||Date.now(); s.dirt=s.dirt||0; if(s.dizzyUntil>Date.now()+BAL.dizzySeconds*1000) s.dizzyUntil=0; s.legacy=s.legacy||0; s.lifeStart=s.lifeStart||s.firstAt;
+  s.cursed=s.cursed||makeCursed(); s.raidDone=s.raidDone||{}; s.firstAt=s.firstAt||Date.now(); s.dirt=s.dirt||0; s.bg=s.bg||'room'; s.bgs=s.bgs||['room','window']; if(s.dizzyUntil>Date.now()+BAL.dizzySeconds*1000) s.dizzyUntil=0; s.legacy=s.legacy||0; s.lifeStart=s.lifeStart||s.firstAt;
   s.pool=s.pool||[]; s.own=s.own||[]; s.sealed=s.sealed||[]; if(s.charges==null){s.charges=BAL.shakeMax;s.chargeAt=Date.now()}
   return s;
 }
@@ -2575,7 +2771,7 @@ function updateTryhard(){
     publish(true);
   } else if(OVER!==was) publish(true);
 }
-function summary(){const G=goalNow(); return {name:Net.user.name,legacy:S.legacy||0,g:{...S.globe,gl:S.gl,dt:Math.round((S.dirt||0)*10)/10,sweat:OVER,dizzy:S.dizzyUntil>Date.now()?1:0},sealed:S.sealed.slice(-12),pool:S.pool,own:S.own,goal:{week:G.week,done:myDone()},at:Date.now()}}
+function summary(){const G=goalNow(); return {name:Net.user.name,legacy:S.legacy||0,g:{...S.globe,gl:S.gl,bg:S.bg,dt:Math.round((S.dirt||0)*10)/10,sweat:OVER,dizzy:S.dizzyUntil>Date.now()?1:0},sealed:S.sealed.slice(-12),pool:S.pool,own:S.own,goal:{week:G.week,done:myDone()},at:Date.now()}}
 
 /* =========================================================
    CLAN GOALS: same tasks for everyone, decided by clan code and week.
@@ -2685,7 +2881,7 @@ function publish(force){
    ========================================================= */
 const mainView=newView(), views={}, floaters=[];
 const viewFor=id=>views[id]||(views[id]=newView());
-let G={cx:0,cy:0,R:0}, tab='parts', started=false;
+let G={cx:0,cy:0,R:0}, tab='parts', started=false, VIEW=null;
 function toast(msg){const d=document.createElement('div');d.className='toast';d.textContent=msg;$('#toasts').appendChild(d);setTimeout(()=>d.remove(),4800)}
 
 function shake(){
@@ -2749,6 +2945,13 @@ function renderStyle(){
     if(has) u+=`<li class="row${S.gl===gl.id?' done':''}"><span class="nm">${gl.n}</span><span class="mt">${gl.cursed?'Cursed relic':i?'Unlocked':'The classic'}</span>${S.gl===gl.id?'<span class="tag">In use</span>':`<button class="sec" data-act="glit" data-id="${gl.id}">Use</button>`}</li>`;
     else {const c=BAL.glitterCost[i-1]; u+=`<li class="row"><span class="nm">${gl.n}</span><span class="mt">+5% snow</span><button data-act="glitbuy" data-id="${gl.id}" data-cost="${c}">Unlock for ${fmt(c)}</button></li>`}
   });
+  u+='</ul>';
+  u+='<h3>Background</h3><p class="lead">What stands behind your globe. Your clan sees it in the cabinet.</p><ul class="list">';
+  for(const b of BGS){
+    const has=S.bgs.includes(b.id);
+    if(has) u+=`<li class="row${S.bg===b.id?' done':''}"><span class="nm">${b.n}</span><span class="mt">${b.cost?'Unlocked':'Free'}</span>${S.bg===b.id?'<span class="tag">In use</span>':`<button class="sec" data-act="bguse" data-id="${b.id}">Use</button>`}</li>`;
+    else u+=`<li class="row"><span class="nm">${b.n}</span><span class="mt">A new place for your globe</span><button data-act="bgbuy" data-id="${b.id}" data-cost="${b.cost}">Unlock for ${fmt(b.cost)}</button></li>`;
+  }
   u+='</ul>';
   if(S.cursed.skies.length){
     u+='<h3>Cursed skies</h3><p class="lead">These replace the sky on this globe while they’re on. Your sky upgrades still count.</p><ul class="list">';
@@ -2826,11 +3029,13 @@ function updateHud(force){
   $('#charges').textContent=S.charges>0?`${S.charges} of ${BAL.shakeMax} shakes ready`:`Next shake in ${dur(BAL.shakeRechargeMin*60000-(Date.now()-S.chargeAt))}`;
   if(S.dirt>0.4){$('#hint').textContent='Your glass is grimy. Drag back and forth across it to clean it'; $('#hint').classList.remove('gone')}
   else if(S.shook&&!S.globe.cr){$('#hint').classList.add('gone')}
-  else if(S.globe.cr){$('#hint').textContent='Your glass is cracked. Keep tapping the globe to mend it'; $('#hint').classList.remove('gone')}
+  else if(S.globe.cr){$('#hint').textContent='Your glass is cracked until the clan beats a raid boss'; $('#hint').classList.remove('gone')}
+  $('#backBtn').hidden=!(VIEW&&tab!=='hearth');
   if(tab==='hearth'){$('#gname').textContent='The hearth'; $('#gsub').textContent=fireLevel()>0?'The stove is burning':'The stove has gone cold'; $('#hint').classList.add('gone')}
+  else if(VIEW&&member(VIEW)){const vm=member(VIEW); $('#gname').textContent=`${vm.name}’s globe`; $('#gsub').textContent=`${THEMES[vm.g.th]?THEMES[vm.g.th].title:''}, ${vm.g.p} of 8 parts`; $('#hint').classList.add('gone')}
   else {$('#gname').textContent=THEMES[S.globe.th].title; $('#gsub').textContent=`Globe no. ${S.no}, ${S.globe.p} of 8 parts`}
   const v=myVisitor();
-  $('#gvis').textContent=[v?`A ${VISITORS[v.type].n} from ${v.fromName} is visiting, +20% snow for ${dur(v.until-Date.now())}`:'',S.blessUntil>Date.now()?`Clan goal reward, +25% snow for ${dur(S.blessUntil-Date.now())}`:S.partUntil>Date.now()?`Clan goal effort, +10% snow for ${dur(S.partUntil-Date.now())}`:'',OVER?`${sweatName(OVER)}: you’ve played ${Math.round(activeMin())} minutes today`:'',S.dizzyUntil>Date.now()?'Your globe is dizzy. Give it a moment':'',S.dirt>0.15?`Grimy glass, −${Math.round(S.dirt*BAL.dirtPenalty*100)}% snow`:'',S.globe.cr?`${S.globe.cr} ${S.globe.cr===1?'crack':'cracks'} in the glass, −${S.globe.cr*Math.round(BAL.crackPenalty*100)}% snow. Tap the globe to mend (${S.mend||0} of ${BAL.mendTaps})`:''].filter(Boolean).join('. ');
+  $('#gvis').textContent=[v?`A ${VISITORS[v.type].n} from ${v.fromName} is visiting, +20% snow for ${dur(v.until-Date.now())}`:'',S.blessUntil>Date.now()?`Clan goal reward, +25% snow for ${dur(S.blessUntil-Date.now())}`:S.partUntil>Date.now()?`Clan goal effort, +10% snow for ${dur(S.partUntil-Date.now())}`:'',OVER?`${sweatName(OVER)}: you’ve played ${Math.round(activeMin())} minutes today`:'',S.dizzyUntil>Date.now()?'Your globe is dizzy. Give it a moment':'',S.dirt>0.15?`Grimy glass, −${Math.round(S.dirt*BAL.dirtPenalty*100)}% snow`:'',S.globe.cr?`${S.globe.cr} ${S.globe.cr===1?'crack':'cracks'} in the glass, −${S.globe.cr*Math.round(BAL.crackPenalty*100)}% snow until the clan beats a raid boss`:''].filter(Boolean).join('. ');
   document.querySelectorAll('[data-cost]').forEach(b=>{const off=S.flakes<+b.dataset.cost; if(b.disabled!==off) b.disabled=off});
 }
 
@@ -2846,9 +3051,12 @@ function act(a,b){
   else if(a==='log'){hearthAct('log'); return}
   else if(a==='pour'){pourPick=!pourPick; renderHearth(); return}
   else if(a==='cheers'){hearthAct('cheers'); return}
+  else if(a==='move'){hearthAct('move'); return}
   else if(a==='say'){sendChatMsg(); return}
   else if(a==='joinraid'){openRaid(); return}
   else if(a==='nudge'){const m=member(id); dayCheck(); S.lim.nudges=S.lim.nudges||{}; if(!m||S.lim.nudges[id]===S.lim.day) return; S.lim.nudges[id]=S.lim.day; Net.send({type:'nudge',to:id,toName:m.name}); toast(`You nudged ${m.name} about the clan goal.`); renderGoal(); saveSoon(); return}
+  else if(a==='bgbuy'){const b=BGMAP[id]; if(!b||S.bgs.includes(id)||S.flakes<b.cost) return; S.flakes-=b.cost; S.bgs.push(id); S.bg=id; toast(`${b.n} unlocked.`)}
+  else if(a==='bguse'){if(!S.bgs.includes(id)) return; S.bg=id}
   else if(a==='csky'){if(!S.cursed.skies.includes(id)) return; g.cs=g.cs===id?null:id; mainView.swirl=1.3}
   else if(a==='glit'){if(!S.glit.includes(id)) return; S.gl=id; mainView.swirl=1.3}
   else if(a==='build'){const c=BAL.itemCost(S.own.length); if(!S.pool.includes(id)||S.own.includes(id)||S.flakes<c) return; S.flakes-=c; S.own.push(id);
@@ -2869,7 +3077,7 @@ function seal(){
   const mine=new Set(S.sealed.map(x=>x.th));
   const waiting=S.cursed.scenes.filter(k=>!mine.has(k)&&k!==old.th);
   let pool=THEME_KEYS.filter(k=>!mine.has(k)&&k!==old.th); if(!pool.length) pool=THEME_KEYS.filter(k=>k!==old.th);
-  S.globe={th:waiting.length?waiting[0]:pick(pool),p:1,s:0,b:0,k:0,cs:null,eq:{...old.eq}}; S.flakes=0; S.no++;
+  S.globe={th:waiting.length?waiting[0]:pick(pool),p:1,s:0,b:0,k:0,cs:null,cr:old.cr||0,eq:{...old.eq}}; S.flakes=0; S.no++;
   Net.send({type:'seal',item:old.th});
   renderPanel(); saveRemote(); publish(true); openIntro(true);
 }
@@ -2890,7 +3098,7 @@ function setTab(n){
   tab=n;
   document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===n));
   for(const p of ['parts','style','items','clan','hearth']) $('#pane-'+p).hidden=p!==n;
-  if(n==='hearth'){chatUnread=0; updateChatBadge(); presenceAt=0; pourPick=false; renderHearth(); setTimeout(()=>{const ul=$('#chatList'); ul.scrollTop=ul.scrollHeight},0)}
+  if(n==='hearth'){chooseMove(); chatUnread=0; updateChatBadge(); presenceAt=0; pourPick=false; renderHearth(); setTimeout(()=>{const ul=$('#chatList'); ul.scrollTop=ul.scrollHeight},0)}
   updateHud(true);
   if(n==='clan'){renderFeed(); renderGoal(); renderRaidBox()}
   if(n==='items') renderItems();
@@ -2914,6 +3122,7 @@ gcv.addEventListener('pointerdown',e=>{
   if(!started) return;
   const r=gcv.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top;
   if(tab==='hearth'){hearthTap(x,y); return}
+  if(VIEW){const vv=viewFor(VIEW); if(Math.hypot(x-G.cx,y-G.cy)<G.R*1.2){vv.swirl=Math.min(1.6,vv.swirl+0.9); vv.wobV+=(Math.random()<0.5?-1:1)*0.7} return}
   if(Math.hypot(x-G.cx,y-G.cy)<G.R*1.05||(Math.abs(x-G.cx)<G.R*0.9&&y>G.cy&&y<G.cy+G.R*1.25)){drag={x:e.clientX,y:e.clientY}; gcv.setPointerCapture(e.pointerId); shake(); mendTap()}
 });
 gcv.addEventListener('pointermove',e=>{if(!drag) return; const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY; const rc=gcv.getBoundingClientRect(); wipe(dx,dy,e.clientX-rc.left,e.clientY-rc.top); mainView.wobV+=dx*0.004; mainView.swirl=Math.min(1.6,mainView.swirl+Math.abs(dx)*0.006)});
@@ -2975,18 +3184,13 @@ function renderMemberCard(){
   $('#ovp').textContent=`${THEMES[m.g.th].title}, ${m.g.p} of 8 parts. ${sealedN} sealed ${sealedN===1?'globe':'globes'}, ${own} ${own===1?'piece':'pieces'} built.`;
   dayCheck();
   const now=Date.now(), last=S.lim.shakes[m.id]||0, left=BAL.friendShakeHours*3600000-(now-last);
-  let h='<h4>Shake</h4>';
+  let h=`<div class="wrap" style="margin-top:4px"><button class="act" data-o="full">See it full size</button></div><h4>Shake</h4>`;
   h+=left>0?`<p class="why">You shook this globe recently. Ready again in ${dur(left)}.</p>`:`<div class="wrap"><button class="act" data-o="shake">Shake ${esc(m.name)}’s globe</button></div><p class="why">You both get snow.</p>`;
   h+='<h4>Send a visitor</h4>';
   const hasVis=m.visitor&&m.visitor.until>now;
   if(hasVis) h+=`<p class="why">${m.visitor.from===Net.user.uid?'Your':'A'} ${esc(VISITORS[m.visitor.type].n)}${m.visitor.from===Net.user.uid?'':' from '+esc(m.visitor.fromName)} is already visiting.</p>`;
   else if(S.lim.visits>=BAL.visitsPerDay) h+='<p class="why">You’ve sent today’s visitor. You can send another tomorrow.</p>';
   else h+='<div class="wrap">'+Object.keys(VISITORS).filter(k=>!VISITORS[k].cursed||S.cursed.vis.includes(k)).map(k=>`<button class="sec" data-o="visit" data-k="${k}">${cap(VISITORS[k].n)}</button>`).join('')+`</div><p class="why">Gives them 20% more snow for ${BAL.visitHours} hours. One visitor a day.</p>`;
-  if(m.g.cr>0){
-    S.lim.mends=S.lim.mends||{};
-    h+='<h4>Mend their glass</h4>';
-    h+=S.lim.mends[m.id]===S.lim.day?`<p class="why">You mended ${esc(m.name)}’s glass today.</p>`:`<div class="wrap"><button class="act" data-o="mend">Mend one crack</button></div><p class="why">Their globe has ${m.g.cr} ${m.g.cr===1?'crack':'cracks'}. Once a day per clanmate.</p>`;
-  }
   h+='<h4>Give a blueprint</h4>';
   const cand=S.own.filter(k=>!ITEMS[k].cursed&&!ITEMS[k].clan&&!ITEMS[k].raid&&!ITEMS[k].legacy&&!(m.pool||[]).includes(k)&&!(m.own||[]).includes(k));
   if(S.lim.gifts>=BAL.giftsPerDay) h+='<p class="why">You’ve given today’s blueprint. You can give another tomorrow.</p>';
@@ -2998,6 +3202,7 @@ $('#ovActs').addEventListener('click',e=>{
   const b=e.target.closest('[data-o]'); if(!b||!ov||ov.mode!=='member') return;
   const m=member(ov.id); if(!m) return; dayCheck();
   const o=b.dataset.o, k=b.dataset.k;
+  if(o==='full'){VIEW=m.id; closeOv(); if(tab==='hearth') setTab('clan'); $('#backBtn').hidden=false; window.scrollTo({top:0,behavior:'smooth'}); return}
   if(o==='shake'){
     S.lim.shakes[m.id]=Date.now(); ov.v.swirl=1.5; ov.v.wobV+=0.8; goalTick('shake',m.id);
     const gain=Math.max(5,rate()*60*BAL.friendShakeMinutes); earn(gain);
@@ -3028,10 +3233,12 @@ function drawStage(t,dt){
   const st=$('#stage'), W=st.clientWidth, H=st.clientHeight; if(!W||!H) return;
   const c=fit(gcv,W,H), narrow=W<600, R=Math.min(W*(narrow?0.4:0.34),H*0.33), cx=W/2, cy=H*(narrow?0.53:0.49), surf=cy+R*1.2;
   G={cx,cy,R};
-  roomBackdrop(c,W,H,cx,surf,R);
+  drawBackdrop(c,W,H,cx,surf,R,VIEW&&member(VIEW)?(member(VIEW).g.bg||'room'):S.bg,t);
   c.fillStyle=rg(c,cx,cy,R*0.6,cx,cy,R*1.7,[[0,'rgba(160,190,255,0.12)'],[1,'rgba(160,190,255,0)']]); c.fillRect(0,0,W,H);
   if(S.dizzyUntil>Date.now()){mainView.spin=1.5; mainView.swirl=Math.max(mainView.swirl,0.7); if(!reduceMotion) mainView.wobV+=Math.sin(t*3)*dt*2} else mainView.spin=0;
-  drawGlobe(c,cx,cy,R,{...S.globe,gl:S.gl,dt:S.dirt,sweat:OVER},mainView,t,{plate:true,visitor:myVisitor()});
+  const vm=VIEW?member(VIEW):null; if(VIEW&&!vm) VIEW=null;
+  if(vm){const vv=viewFor(vm.id); stepView(vv,dt,flakeN(vm.g.s),t); drawGlobe(c,cx,cy,R,vm.g,vv,t,{plate:true,visitor:vm.visitor&&vm.visitor.until>Date.now()?vm.visitor:null})}
+  else drawGlobe(c,cx,cy,R,{...S.globe,gl:S.gl,dt:S.dirt,sweat:OVER},mainView,t,{plate:true,visitor:myVisitor()});
   for(let i=wipeSparks.length-1;i>=0;i--){const w=wipeSparks[i]; w.life-=dt; if(w.life<=0){wipeSparks.splice(i,1);continue} c.fillStyle=`rgba(255,255,255,${w.life/0.6})`; c.fillRect(w.x-6,w.y-1,12,2); c.fillRect(w.x-1,w.y-6,2,12)}
   c.font=`600 ${Math.round(Math.max(16,R*0.1))}px Fraunces, Georgia, serif`; c.textAlign='center';
   for(let i=floaters.length-1;i>=0;i--){const f=floaters[i]; f.life-=dt*0.6; f.y-=30*dt; if(f.life<=0){floaters.splice(i,1);continue} c.fillStyle=`rgba(255,243,214,${f.life})`; c.fillText(f.txt,f.x,f.y)}
@@ -3059,6 +3266,11 @@ function drawCabinet(t,dt){
   for(const gx of GRAIN){const x=gx*W;c.beginPath();c.moveTo(x,0);c.bezierCurveTo(x+9,H*0.3,x-9,H*0.6,x+4,H);c.stroke()}
   c.fillStyle=rg(c,W/2,-30,0,W/2,-30,Math.max(W,H)*0.85,[[0,'rgba(255,200,130,0.24)'],[1,'rgba(255,200,130,0)']]); c.fillRect(0,0,W,H);
   slots.length=0;
+  mem.forEach((m,i)=>{
+    const r=Math.floor(i/cols), k=i%cols, y0=pad+r*sh, shelfY=y0+R*2.22+8, isMe=m.id===Net.user.uid, bg=isMe?S.bg:(m.g.bg||'room');
+    const img=backdropImage(bg,sw-6,shelfY-y0+2,R);
+    c.save(); rr(c,k*sw+3,y0,sw-6,shelfY-y0+2,8); c.clip(); c.drawImage(img,k*sw+3,y0,sw-6,shelfY-y0+2); c.fillStyle='rgba(20,10,4,0.18)'; c.fillRect(k*sw,y0,sw,shelfY-y0+2); c.restore();
+  });
   for(let r=0;r<rows;r++) shelf(c,W,pad+r*sh+R*2.22+8);
   mem.forEach((m,i)=>{
     const r=Math.floor(i/cols), k=i%cols, y0=pad+r*sh, shelfY=y0+R*2.22+8, cx=k*sw+sw/2, isMe=m.id===Net.user.uid;
@@ -3090,7 +3302,8 @@ function drawOverlay(t,dt){
   const cv=$('#ovc'), W=cv.clientWidth; if(!W) return;
   const H=Math.round(W*(ov.mode==='member'?0.78:0.95)); cv.style.height=H+'px';
   const c=fit(cv,W,H), R=Math.min(W*0.29,H*0.3), cx=W/2, cy=H*0.42, surf=cy+R*1.2;
-  roomBackdrop(c,W,H,cx,surf,R);
+  const obg=ov.mode==='member'&&member(ov.id)?(member(ov.id).g.bg||'room'):(ov.mode==='intro'||ov.mode==='goal'||ov.mode==='omen')?S.bg:'room';
+  drawBackdrop(c,W,H,cx,surf,R,obg,t);
   let g, vis=null;
   if(ov.mode==='intro') g={...S.globe,gl:S.gl,dt:S.dirt};
   else if(ov.mode==='goal'){g={...S.globe,gl:S.gl,eq:{...S.globe.eq}}; if(ov.tro) g.eq.L=ov.tro}
@@ -3235,12 +3448,15 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&S){saveRemote();publish(true)}});
-$('#raidc').addEventListener('pointerdown',e=>{e.preventDefault(); raidTap(e.clientX,e.clientY)});
+$('#raidc').addEventListener('touchstart',e=>{e.preventDefault(); for(const tc of e.changedTouches) raidTap(tc.clientX,tc.clientY)},{passive:false});
+$('#raidc').addEventListener('touchmove',e=>e.preventDefault(),{passive:false});
+$('#raidc').addEventListener('pointerdown',e=>{if(e.pointerType==='touch') return; e.preventDefault(); raidTap(e.clientX,e.clientY)});
 addEventListener('keydown',e=>{if(RS.open&&!RS.ended&&(e.key===' '||e.key==='Enter')){e.preventDefault(); raidTap(innerWidth/2,innerHeight*0.45)}});
 $('#rleave').addEventListener('click',closeRaid);
 $('#rrb').addEventListener('click',closeRaid);
 $('#raidBanner').addEventListener('click',openRaid);
 $('#endb').addEventListener('click',rebirth);
+$('#backBtn').addEventListener('click',()=>{VIEW=null; $('#backBtn').hidden=true});
 requestAnimationFrame(frame);
 boot();
 </script>
