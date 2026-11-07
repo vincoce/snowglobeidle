@@ -78,7 +78,7 @@ button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline
 #cab{display:block;width:100%;border-radius:12px;cursor:pointer}
 .code{font:600 18px 'Fraunces',Georgia,serif;letter-spacing:.08em;color:var(--ink)}
 .inrow{display:flex;gap:8px;margin:14px 0 6px}
-input[type=text]{flex:1;min-width:0;font:15px 'Nunito Sans',sans-serif;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--field);color:var(--ink)}
+input[type=text],input[type=password]{flex:1;min-width:0;font:15px 'Nunito Sans',sans-serif;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:var(--field);color:var(--ink)}
 .goal{border:1.5px solid var(--accent);border-radius:12px;padding:14px 14px 10px;margin:4px 0 18px}
 .goal h3{margin-top:0}
 .goal .who{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:14px}
@@ -138,6 +138,14 @@ input[type=text]{flex:1;min-width:0;font:15px 'Nunito Sans',sans-serif;padding:1
 .gatecard>p{color:var(--muted);margin:0 0 16px;font-size:15px}
 .gatecard h3{font:600 18px 'Fraunces',Georgia,serif;margin:14px 0 0}
 .gatecard .inrow{margin-top:8px}
+.clanlist{list-style:none;margin:8px 0 4px;padding:0;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:10px}
+.clanlist li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-top:1px solid var(--line)}
+.clanlist li:first-child{border-top:0}
+.clanlist li.small{display:block;border:0}
+.clanlist b{display:block;font-weight:700}
+.clanlist span{font-size:13px;color:var(--muted)}
+.clanlist button{font:700 13px 'Nunito Sans',sans-serif;background:var(--btn);color:var(--btn-ink);border:0;border-radius:8px;padding:8px 12px;cursor:pointer;white-space:nowrap}
+.clanlist li.sel{background:color-mix(in srgb,var(--accent) 12%,transparent)}
 .err{color:var(--err);font-size:14px;margin:10px 0 0;min-height:1em}
 .small{font-size:13px;color:var(--muted);margin:10px 0 0}
 @media (max-width:820px){
@@ -158,13 +166,19 @@ input[type=text]{flex:1;min-width:0;font:15px 'Nunito Sans',sans-serif;padding:1
     <div id="g-loading">Loading…</div>
     <div id="g-signin" hidden>
       <button class="big" id="btnSignIn">Sign in with Google</button>
-      <p class="small" id="demoNote" hidden>Firebase isn’t configured yet, so this runs as a local demo with simulated clanmates.</p>
+      <p class="small" id="demoNote" hidden>Firebase isn’t configured yet, so this runs as a local demo with simulated clanmates. Any password works in the demo.</p>
     </div>
     <div id="g-clan" hidden>
-      <h3>Create a clan</h3>
-      <div class="inrow"><input type="text" id="clanName" maxlength="24" placeholder="Clan name" aria-label="Clan name"><button id="btnCreate">Create</button></div>
       <h3>Join a clan</h3>
-      <div class="inrow"><input type="text" id="clanCode" maxlength="6" placeholder="6-letter code" aria-label="Clan code" autocapitalize="characters"><button id="btnJoin">Join</button></div>
+      <ul class="clanlist" id="clanList"><li class="small">Loading clans…</li></ul>
+      <div id="pwRow" hidden>
+        <p class="small" id="pwFor"></p>
+        <div class="inrow"><input type="password" id="clanPw" maxlength="80" placeholder="Clan password" aria-label="Clan password" autocomplete="off"><button id="btnPw">Join</button></div>
+      </div>
+      <h3>Or start your own</h3>
+      <div class="inrow"><input type="text" id="clanName" maxlength="24" placeholder="Clan name" aria-label="Clan name"></div>
+      <div class="inrow"><input type="password" id="newPw" maxlength="80" placeholder="Password (optional)" aria-label="Password for your clan, optional" autocomplete="new-password"><button id="btnCreate">Create</button></div>
+      <p class="small">With a password, only people you tell it to can join. Without one, anyone can.</p>
     </div>
     <p class="err" id="gerr" role="alert"></p>
   </div>
@@ -192,7 +206,7 @@ input[type=text]{flex:1;min-width:0;font:15px 'Nunito Sans',sans-serif;padding:1
     <div class="pane" id="pane-items" hidden></div>
     <div class="pane" id="pane-clan" hidden>
       <h3 id="clanTitle"></h3>
-      <p class="lead">Invite code <span class="code" id="clanCodeOut"></span> <button class="sec act" data-act="copy" style="padding:5px 10px;margin-left:6px">Copy</button></p>
+      <p class="lead" id="clanInvite"></p>
       <div id="raidBox"></div>
       <div id="goalBox"></div>
       <h3>Cabinet</h3>
@@ -247,6 +261,7 @@ const FIREBASE_CONFIG = window.FIREBASE_CONFIG || {
   appId: ""
 };
 const FB_VER = '10.12.2';
+
 const DEMO = !FIREBASE_CONFIG.apiKey || new URLSearchParams(location.search).has('demo');
 
 /* =========================================================
@@ -266,7 +281,7 @@ const BAL = {
   shakeMax:3, shakeRechargeMin:90, shakeMinutes:15,
   friendShakeHours:4, friendShakeMinutes:10,
   visitHours:8, visitBonus:0.2, visitsPerDay:1, giftsPerDay:1, noteGapMin:5,
-  poolGround:5, poolSky:2, clanMax:8,
+  poolGround:5, poolSky:2, clanMax:12,
   // cursed relics: chance per roll, and a guarantee after this many rolls
   omenShake:0.03, omenReceived:0.05, omenPart:0.06, omenSeal:0.5, omenPity:45,
   // weekly clan goal: everyone must finish every task
@@ -2069,28 +2084,33 @@ function FireNet(){
     async signOut(){await m.signOut(auth); location.reload()},
     async loadProfile(){const s=await m.getDoc(m.doc(db,'users',N.user.uid)); return s.exists()?s.data():null},
     saveProfile(o){return m.setDoc(m.doc(db,'users',N.user.uid),o,{merge:true}).catch(e=>console.warn('save failed',e))},
-    async createClan(name){
-      for(let i=0;i<6;i++){
-        const code=genCode(), ref=m.doc(db,'clans',code);
-        if((await m.getDoc(ref)).exists()) continue;
-        await m.setDoc(ref,{name,owner:N.user.uid,at:Date.now()});
-        return N.joinClan(code);
-      }
-      throw new Error('Could not reserve a clan code. Try again.');
+    async listClans(){
+      const snap=await m.getDocs(m.query(m.collection(db,'clans'),m.orderBy('at','desc'),m.limit(60)));
+      return snap.docs.map(d=>({id:d.id,name:d.data().name,n:d.data().n||0,locked:!!d.data().locked}));
     },
-    async joinClan(code){
-      code=code.trim().toUpperCase();
-      const s=await m.getDoc(m.doc(db,'clans',code));
-      if(!s.exists()) throw new Error('No clan uses that code. Check it with your clanmate and try again.');
-      await m.setDoc(m.doc(db,'clans',code,'members',N.user.uid),{name:N.user.name,joined:Date.now()},{merge:true});
-      await N.saveProfile({clanId:code});
-      N.clan={id:code,name:s.data().name}; return N.clan;
+    async createClan(name,pw){
+      let id=null;
+      for(let i=0;i<6&&!id;i++){const c=genCode(); if(!(await m.getDoc(m.doc(db,'clans',c))).exists()) id=c}
+      if(!id) throw new Error('Could not create the clan. Try again.');
+      await m.setDoc(m.doc(db,'clans',id),{name,owner:N.user.uid,at:Date.now(),locked:!!pw,n:0});
+      if(pw) await m.setDoc(m.doc(db,'clans',id,'secret','join'),{pw});
+      return N.joinClan(id,pw);
+    },
+    async joinClan(id,pw){
+      const c=await m.getDoc(m.doc(db,'clans',id));
+      if(!c.exists()) throw new Error('That clan no longer exists.');
+      if((c.data().n||0)>=BAL.clanMax) throw new Error('That clan is full.');
+      try{await m.setDoc(m.doc(db,'clans',id,'members',N.user.uid),{name:N.user.name,joined:Date.now(),pw:pw||''})}
+      catch(e){throw new Error(e.code==='permission-denied'?(c.data().locked?'That password isn’t right.':'That clan is full.'):'Could not join. '+(e.message||e))}
+      await m.updateDoc(m.doc(db,'clans',id),{n:m.increment(1)}).catch(e=>console.warn(e));
+      await N.saveProfile({clanId:id});
+      N.clan={id,name:c.data().name,locked:!!c.data().locked}; return N.clan;
     },
     async openClan(id){
-      const s=await m.getDoc(m.doc(db,'clans',id)); if(!s.exists()) return null;
+      const c=await m.getDoc(m.doc(db,'clans',id)); if(!c.exists()) return null;
       const me=await m.getDoc(m.doc(db,'clans',id,'members',N.user.uid)).catch(()=>null);
       if(!me||!me.exists()) return null;
-      N.clan={id,name:s.data().name}; return N.clan;
+      N.clan={id,name:c.data().name,locked:!!c.data().locked}; return N.clan;
     },
     start(h){
       const cl=['clans',N.clan.id];
@@ -2172,11 +2192,16 @@ function DemoNet(){
     async signOut(){localStorage.removeItem(KD); localStorage.removeItem('snowfall.save.me'); location.reload()},
     async loadProfile(){return {clanId:D.clan&&D.clan.id,save:D.save}},
     async saveProfile(o){if(o.save) D.save=o.save; persist()},
-    async createClan(name){D.clan={id:genCode(),name}; D.mates=makeMates(); D.feed=[]; persist(); N.clan=D.clan; return D.clan},
-    async joinClan(code){
-      code=code.trim().toUpperCase();
-      if(code.length!==6) throw new Error('Clan codes are 6 letters. Check it with your clanmate and try again.');
-      D.clan={id:code,name:'Frost Hollow'}; D.mates=makeMates(); D.feed=[]; persist(); N.clan=D.clan; return D.clan;
+    async listClans(){
+      D.others=D.others||[{id:'FRST01',name:'Frost Hollow',n:4,locked:false},{id:'YETI22',name:'Yeti Gang',n:3,locked:true},{id:'KRMP99',name:'Krampus Fan Club',n:BAL.clanMax,locked:false}];
+      return D.others;
+    },
+    async createClan(name,pw){D.clan={id:genCode(),name,locked:!!pw}; D.mates=makeMates(); D.feed=[]; persist(); N.clan=D.clan; return D.clan},
+    async joinClan(id,pw){
+      const c=(D.others||[]).find(x=>x.id===id); if(!c) throw new Error('That clan no longer exists.');
+      if(c.n>=BAL.clanMax) throw new Error('That clan is full.');
+      if(c.locked&&!pw) throw new Error('That password isn’t right.');
+      D.clan={id,name:c.name,locked:c.locked}; D.mates=makeMates(); D.feed=[]; persist(); N.clan=D.clan; return D.clan;
     },
     async openClan(){N.clan=D.clan; return D.clan},
     start(handlers){h=handlers; emitMembers(); h.onFeed(D.feed); N.raidListen(handlers.onRaids); setInterval(sim,1000)},
@@ -2571,7 +2596,6 @@ function act(a,b){
   else if(a==='eq'){const slot=b.dataset.slot, eq=g.eq; if(!S.own.includes(id)) return;
     if(eq[slot]===id) eq[slot]=null; else {if(slot!=='S'){if(eq.L===id) eq.L=null; if(eq.R===id) eq.R=null} eq[slot]=id}}
   else if(a==='seal'){if(g.p<8) return; seal(); return}
-  else if(a==='copy'){navigator.clipboard&&navigator.clipboard.writeText(Net.clan.id).then(()=>toast('Invite code copied.'),()=>toast(`The invite code is ${Net.clan.id}.`)); return}
   else if(a==='note'){postNote(); return}
   else if(a==='signout'){saveRemote(); setTimeout(()=>Net.signOut(),300); return}
   renderPanel(); saveSoon();
@@ -2828,6 +2852,7 @@ function drawGate(t,dt){
 function showGate(step,err){
   $('#gate').hidden=false;
   for(const s of ['loading','signin','clan']) $('#g-'+s).hidden=s!==step;
+  if(step==='clan'&&!err) loadClanList();
   $('#gerr').textContent=err||'';
   if(step==='signin'){ $('#btnSignIn').textContent=DEMO?'Play the demo':'Sign in with Google'; $('#demoNote').hidden=!DEMO; }
 }
@@ -2850,14 +2875,41 @@ async function afterSignIn(){
 $('#btnSignIn').addEventListener('click',async()=>{
   try{await Net.signIn(); afterSignIn()}catch(e){showGate('signin',e.code==='auth/popup-closed-by-user'?'The sign-in window was closed. Try again.':'Sign-in failed. '+(e.message||e))}
 });
-async function clanAction(fn){
-  $('#gerr').textContent=''; $('#btnCreate').disabled=$('#btnJoin').disabled=true;
-  try{await fn(); await enterGame(null,true)}catch(e){showGate('clan',e.message||String(e))}
-  $('#btnCreate').disabled=$('#btnJoin').disabled=false;
+let clanChoice=null, clanCache=[];
+async function loadClanList(){
+  const ul=$('#clanList'); ul.innerHTML='<li class="small">Loading clans…</li>'; $('#pwRow').hidden=true; clanChoice=null;
+  try{clanCache=await Net.listClans()}catch(e){ul.innerHTML='<li class="small">Could not load the clan list. Reload to try again.</li>'; return}
+  if(!clanCache.length){ul.innerHTML='<li class="small">No clans yet. Start the first one below.</li>'; return}
+  ul.innerHTML=clanCache.map(c=>{
+    const full=c.n>=BAL.clanMax;
+    return `<li data-id="${esc(c.id)}"><div><b>${esc(c.name)}</b><span>${c.n} of ${BAL.clanMax} players${c.locked?', password needed':''}</span></div>${full?'<span>Full</span>':`<button data-join="${esc(c.id)}">Join</button>`}</li>`;
+  }).join('');
 }
-$('#btnCreate').addEventListener('click',()=>{const n=$('#clanName').value.trim(); if(!n){$('#gerr').textContent='Give your clan a name first.';return} clanAction(()=>Net.createClan(n.slice(0,24)))});
-$('#btnJoin').addEventListener('click',()=>{const c=$('#clanCode').value.trim(); if(!c){$('#gerr').textContent='Enter the 6-letter code a clanmate shared with you.';return} clanAction(()=>Net.joinClan(c))});
-
+$('#clanList').addEventListener('click',e=>{
+  const b=e.target.closest('[data-join]'); if(!b) return;
+  const c=clanCache.find(x=>x.id===b.dataset.join); if(!c) return;
+  document.querySelectorAll('#clanList li').forEach(li=>li.classList.toggle('sel',li.dataset.id===c.id));
+  $('#gerr').textContent='';
+  if(c.locked){clanChoice=c; $('#pwFor').textContent=`${c.name} needs a password. Ask a member for it.`; $('#pwRow').hidden=false; $('#clanPw').value=''; $('#clanPw').focus()}
+  else clanAction(()=>Net.joinClan(c.id,''));
+});
+function submitPw(){
+  if(!clanChoice) return; const pw=$('#clanPw').value;
+  if(!pw){$('#gerr').textContent='Enter the password first.'; return}
+  const c=clanChoice; clanAction(()=>Net.joinClan(c.id,pw));
+}
+$('#btnPw').addEventListener('click',submitPw);
+$('#clanPw').addEventListener('keydown',e=>{if(e.key==='Enter') submitPw()});
+async function clanAction(fn){
+  $('#gerr').textContent=''; $('#btnCreate').disabled=$('#btnPw').disabled=true;
+  try{await fn(); await enterGame(null,true)}
+  catch(e){$('#gerr').textContent=e.message||String(e)}
+  $('#btnCreate').disabled=$('#btnPw').disabled=false;
+}
+$('#btnCreate').addEventListener('click',()=>{
+  const n=$('#clanName').value.trim(); if(!n){$('#gerr').textContent='Give your clan a name first.';return}
+  const pw=$('#newPw').value; clanAction(()=>Net.createClan(n.slice(0,24),pw));
+});
 let firstMembers=null;
 async function enterGame(remoteSave,joined){
   showGate('loading');
@@ -2882,7 +2934,8 @@ async function enterGame(remoteSave,joined){
   if(joined) Net.send({type:'join'});
   pendingInbox.splice(0).forEach(onInbox);
   if(lastRaidList) onRaids(lastRaidList);
-  $('#clanTitle').textContent=Net.clan.name; $('#clanCodeOut').textContent=Net.clan.id;
+  $('#clanTitle').textContent=Net.clan.name;
+  $('#clanInvite').textContent=Net.clan.locked?'New players find this clan in the list when they sign in, and need the clan password to join.':'New players can find and join this clan from the list when they sign in.';
   $('#gate').hidden=true; $('#app').hidden=false; started=true;
   renderPanel(); renderFeed();
   if(S.shook) $('#hint').classList.add('gone');
