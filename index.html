@@ -2711,6 +2711,12 @@ function shake(){
   if(!S.shook){S.shook=true;$('#hint').classList.add('gone')}
 }
 
+/* Replace a pane's content only when it actually changed, and set button states right away,
+   so re-renders don't flash enabled buttons for a moment. */
+function setPane(el,html){
+  if(el._html!==html){el.innerHTML=html; el._html=html}
+  el.querySelectorAll('[data-cost]').forEach(b=>{const off=S.flakes<+b.dataset.cost; if(b.disabled!==off) b.disabled=off});
+}
 function renderParts(){
   const g=S.globe, th=THEMES[g.th], m=mult();
   let h='';
@@ -2726,7 +2732,7 @@ function renderParts(){
     else if(i===g.p) h+=`<li class="row"><span class="nm">${nm}</span><span class="mt">${prod}</span><button data-act="part" data-cost="${partCostNow(i)}">Add for ${fmt(partCostNow(i))}</button></li>`;
     else h+=`<li class="row locked"><span class="nm">Hidden part</span><span class="mt">Revealed when you add the part above</span></li>`;
   });
-  $('#pane-parts').innerHTML=h+'</ul>';
+  setPane($('#pane-parts'),h+'</ul>');
 }
 function renderStyle(){
   const g=S.globe; let u='<h3>This globe</h3><p class="lead">These belong to the current globe and stay on it in the cabinet after you seal it.</p><ul class="list">';
@@ -2750,7 +2756,7 @@ function renderStyle(){
     u+='</ul>';
   }
   if(S.sealed.length) u+=`<p class="note">${S.sealed.length} sealed ${S.sealed.length===1?'globe adds':'globes add'} ${S.sealed.length*50}% to all snow.</p>`;
-  $('#pane-style').innerHTML=u;
+  setPane($('#pane-style'),u);
 }
 function renderItems(){
   const eq=S.globe.eq, nm=id=>id&&ITEMS[id]?ITEMS[id].n:'Empty';
@@ -2775,7 +2781,7 @@ function renderItems(){
   const C=S.cursed, found=C.order.slice(0,C.idx);
   h+=`<h3>Cursed relics</h3><p class="lead">Rare, dark finds. They turn up when you shake your globe, add a part, get visited or shaken by clanmates, and when you seal a globe. Everyone finds them in a different order. You’ve found ${found.length} of ${C.order.length}.</p>`;
   if(found.length) h+='<ul class="list">'+found.map(id=>{const kind=id.split(':')[0]; return `<li class="row"><span class="nm">${esc(omenName(id))}</span><span class="mt">${{scene:'Cursed scene',item:'Ground piece',glit:'Glitter',sky:'Sky',vis:'Visitor'}[kind]}</span></li>`}).join('')+'</ul>';
-  $('#pane-items').innerHTML=h;
+  setPane($('#pane-items'),h);
 }
 function feedLine(e){
   const me=Net.user.uid, f=e.from===me?'You':esc(e.fromName), to=e.to===me?'you':esc(e.toName);
@@ -2823,7 +2829,7 @@ function updateHud(force){
   else {$('#gname').textContent=THEMES[S.globe.th].title; $('#gsub').textContent=`Globe no. ${S.no}, ${S.globe.p} of 8 parts`}
   const v=myVisitor();
   $('#gvis').textContent=[v?`A ${VISITORS[v.type].n} from ${v.fromName} is visiting, +20% snow for ${dur(v.until-Date.now())}`:'',S.blessUntil>Date.now()?`Clan goal reward, +25% snow for ${dur(S.blessUntil-Date.now())}`:S.partUntil>Date.now()?`Clan goal effort, +10% snow for ${dur(S.partUntil-Date.now())}`:'',OVER?`${sweatName(OVER)}: you’ve played ${Math.round(activeMin())} minutes today`:'',S.dizzyUntil>Date.now()?'Your globe is dizzy. Give it a moment':'',S.dirt>0.15?`Grimy glass, −${Math.round(S.dirt*BAL.dirtPenalty*100)}% snow`:'',S.globe.cr?`${S.globe.cr} ${S.globe.cr===1?'crack':'cracks'} in the glass, −${S.globe.cr*Math.round(BAL.crackPenalty*100)}% snow. Tap the globe to mend (${S.mend||0} of ${BAL.mendTaps})`:''].filter(Boolean).join('. ');
-  document.querySelectorAll('[data-cost]').forEach(b=>{b.disabled=S.flakes<+b.dataset.cost});
+  document.querySelectorAll('[data-cost]').forEach(b=>{const off=S.flakes<+b.dataset.cost; if(b.disabled!==off) b.disabled=off});
 }
 
 function act(a,b){
