@@ -2779,8 +2779,10 @@ function renderItems(){
   if(ks.length) h+=`<p class="lead">Clanmates can give you one blueprint a day from their globe’s window in the cabinet.</p><ul class="list">`+ks.map(id=>`<li class="row locked" style="opacity:.8"><span class="nm">${ITEMS[id].n}</span><span class="mt">Built by ${esc(seen[id].join(', '))}</span></li>`).join('')+'</ul>';
   else h+=`<p class="lead">Nobody in your clan has built a piece you’re missing yet.</p>`;
   const C=S.cursed, found=C.order.slice(0,C.idx);
-  h+=`<h3>Cursed relics</h3><p class="lead">Rare, dark finds. They turn up when you shake your globe, add a part, get visited or shaken by clanmates, and when you seal a globe. Everyone finds them in a different order. You’ve found ${found.length} of ${C.order.length}.</p>`;
-  if(found.length) h+='<ul class="list">'+found.map(id=>{const kind=id.split(':')[0]; return `<li class="row"><span class="nm">${esc(omenName(id))}</span><span class="mt">${{scene:'Cursed scene',item:'Ground piece',glit:'Glitter',sky:'Sky',vis:'Visitor'}[kind]}</span></li>`}).join('')+'</ul>';
+  if(found.length){
+    h+=`<h3>Cursed relics</h3><p class="lead">Something dark has been finding its way into your globe.</p>`;
+    h+='<ul class="list">'+found.map(id=>{const kind=id.split(':')[0]; return `<li class="row"><span class="nm">${esc(omenName(id))}</span><span class="mt">${{scene:'Cursed scene',item:'Ground piece',glit:'Glitter',sky:'Sky',vis:'Visitor'}[kind]}</span></li>`}).join('')+'</ul>';
+  }
   setPane($('#pane-items'),h);
 }
 function feedLine(e){
