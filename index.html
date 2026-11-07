@@ -277,7 +277,9 @@ const BAL = {
   // dirty glass: fully grimy after dirtHours, costs up to dirtPenalty; wipeDist = globe radii of rubbing to clean fully
   dirtHours:30, dirtPenalty:0.3, wipeDist:25,
   // the ending: the cat strikes when you seal this many globes
-  finalSeal:10, legacyBonus:0.5, mendTaps:60, mendsPerDay:1,
+  finalSeal:10, legacyBonus:0.5,
+  // playing a lot earns a playful label (no penalty): minutes of active play in the last 24 hours
+  sweatTiers:[[90,'Sweating'],[180,'Tryhard'],[300,'Touch grass']], pesterLimit:40, dizzyMinutes:10,
   goalTasks:3, goalBless:0.25, goalPartBless:0.10, goalBlessDays:7, goalOfferHours:2, goalSkipInactiveDays:14, nudgesPerMemberPerDay:1
 };
 
@@ -1685,6 +1687,19 @@ const CURSED_IDS=[...CURSED_THEMES.map(k=>'scene:'+k),...Object.keys(ITEMS).filt
    ========================================================= */
 const DIRT=(()=>{const r=rng(555), a=[]; for(let i=0;i<28;i++){const ang=r()*TAU, rad=Math.sqrt(r())*0.85; a.push({x:Math.cos(ang)*rad,y:Math.sin(ang)*rad,r:0.06+r()*0.16,th:r(),print:r()<0.25})} return a})();
 const SPECK=(()=>{const r=rng(777), a=[]; for(let i=0;i<60;i++){const ang=r()*TAU, rad=Math.sqrt(r())*0.95; a.push([Math.cos(ang)*rad,Math.sin(ang)*rad,0.003+r()*0.006,r()])} return a})();
+const SWEAT=(()=>{const r=rng(4242), a=[]; for(let i=0;i<18;i++){const ang=-Math.PI*0.95+r()*Math.PI*0.9, rad=0.55+r()*0.35; a.push({x:Math.cos(ang)*rad,y:Math.sin(ang)*rad*0.9,sp:0.05+r()*0.08,ph:r(),sz:0.018+r()*0.02})} return a})();
+function drawSweat(c,R,tier,t){
+  const n=[0,6,11,18][Math.min(3,tier)];
+  c.save(); c.beginPath(); c.arc(0,0,R*0.985,0,TAU); c.clip();
+  for(let i=0;i<n;i++){
+    const d=SWEAT[i], run=((t*d.sp+d.ph)%1), x=d.x*R, y=(d.y+run*0.55)*R, s2=d.sz*R;
+    c.globalAlpha=Math.sin(run*Math.PI)*0.9;
+    c.strokeStyle='rgba(220,240,255,0.35)'; c.lineWidth=s2*0.5; c.beginPath(); c.moveTo(x,y-s2*1.2); c.lineTo(x,y-run*0.55*R); c.stroke();
+    c.fillStyle=rg(c,x-s2*0.3,y-s2*0.3,s2*0.1,x,y,s2,[[0,'rgba(255,255,255,0.95)'],[0.5,'rgba(190,225,255,0.6)'],[1,'rgba(150,200,240,0.25)']]);
+    c.beginPath(); c.moveTo(x,y-s2*1.4); c.quadraticCurveTo(x+s2,y,x,y+s2*0.9); c.quadraticCurveTo(x-s2,y,x,y-s2*1.4); c.fill();
+  }
+  c.restore();
+}
 function drawDirt(c,R,d){
   if(!(d>0.03)) return;
   c.save(); c.beginPath(); c.arc(0,0,R*0.985,0,TAU); c.clip();
@@ -1950,30 +1965,43 @@ function drawBase(c,R,b,plate,t){
   c.strokeStyle='rgba(0,0,0,0.25)'; c.lineWidth=R*0.01; c.beginPath(); c.ellipse(0,top+R*0.02,wT,ryT,0,0.05*Math.PI,0.95*Math.PI); c.stroke();
 }
 function newView(){return {fl:[],swirl:0,wob:0,wobV:0,flash:0}}
+const GROUND=x=>0.56+0.12*x*x;
 function newFlake(spread){
-  const x=Math.random()*1.8-0.9, r=0.006+Math.random()*0.011;
-  return {x,y:spread?-0.9+Math.random()*1.4:-Math.sqrt(Math.max(0,1-x*x))*0.9,r,a:0.55+Math.random()*0.45,ph:Math.random()*TAU,vx:0,vy:0.03+r*2};
+  const r=0.006+Math.random()*0.011, f={r,a:0.55+Math.random()*0.45,ph:Math.random()*TAU,vx:0,vy:0,age:spread?9:0,x:0,y:0};
+  if(spread){
+    for(let k=0;k<20;k++){const x=Math.random()*1.84-0.92, y=Math.random()*1.84-0.92; if(x*x+y*y<0.85&&y<GROUND(x)-0.02){f.x=x;f.y=y;break}}
+  } else {
+    const x=Math.random()*1.84-0.92; f.x=x; f.y=-Math.sqrt(Math.max(0,0.86-x*x))+Math.random()*0.04;
+  }
+  f.vy=0.09+r*3;
+  return f;
 }
 const flakeN=s=>40+22*(s||0);
 function stepView(v,dt,n,t){
-  while(v.fl.length<n) v.fl.push(newFlake(v.fl.length<n*0.9));
+  while(v.fl.length<n) v.fl.push(newFlake(true));
   if(v.fl.length>n) v.fl.length=n;
-  v.swirl*=Math.pow(0.5,dt);
+  v.swirl*=Math.pow(0.45,dt);
   v.wobV+=(-v.wob*45-v.wobV*5.5)*dt; v.wob+=v.wobV*dt; v.wob=Math.max(-0.15,Math.min(0.15,v.wob));
   v.flash=Math.max(0,v.flash-dt*1.1); if(!v.flash) v.fc=null;
-  const s=v.swirl, calm=1-Math.min(1,s);
+  const s=Math.min(1.6,v.swirl), calm=1-Math.min(1,s), spin=v.spin||0;
   for(const f of v.fl){
-    f.vy+=(0.035+f.r*2.6-f.vy)*dt*1.4*calm;
-    if(s>0.02){f.vx+=(-f.y*1.7+(Math.random()-0.5)*2.2)*s*dt; f.vy+=(f.x*1.7-0.5+(Math.random()-0.5)*2.2)*s*dt}
-    f.vx*=Math.pow(0.35,dt);
-    f.x+=(f.vx+(reduceMotion?0:Math.sin(t*0.8+f.ph)*0.025))*dt; f.y+=f.vy*dt;
+    f.age+=dt;
+    const fall=0.09+f.r*3, k=1.2*s*(1+spin);
+    const ux=-f.y*k+Math.sin(t*1.7+f.ph*5)*0.3*s+(reduceMotion?0:Math.sin(t*0.8+f.ph)*0.03);
+    const uy=f.x*k+fall*(0.25+0.75*calm)+Math.cos(t*1.3+f.ph*7)*0.3*s;
+    const kr=Math.min(1,dt*12); f.vx+=(ux-f.vx)*kr; f.vy+=(uy-f.vy)*kr;
+    f.x+=f.vx*dt; f.y+=f.vy*dt;
     const d=Math.hypot(f.x,f.y);
-    if(d>0.95){f.x*=0.95/d;f.y*=0.95/d;f.vx*=-0.3;f.vy*=-0.3}
-    if(f.y>0.56+0.12*f.x*f.x&&s<0.35) Object.assign(f,newFlake(false));
+    if(d>0.94){
+      const nx=f.x/d, ny=f.y/d, vn=f.vx*nx+f.vy*ny;
+      f.x=nx*0.93; f.y=ny*0.93;
+      if(vn>0){f.vx-=1.2*vn*nx; f.vy-=1.2*vn*ny}
+    }
+    if(f.y>GROUND(f.x)){ if(s<0.4) Object.assign(f,newFlake(false)); else {f.y=GROUND(f.x)-0.005; f.vy=-Math.abs(f.vy)*0.6} }
   }
 }
 function drawGlobe(c,cx,cy,R,g,v,t,o={}){
-  const th=THEMES[g.th]||THEMES.tree, eq=g.eq||{}, gd=GLIT[g.gl]||GLIT.white;
+  const th=g.th==='empty'?{draw:()=>{}}:(THEMES[g.th]||THEMES.tree), eq=g.eq||{}, gd=GLIT[g.gl]||GLIT.white;
   c.save(); c.translate(cx,cy+R*1.23); c.scale(1,0.13);
   c.fillStyle=rg(c,0,0,0,0,0,R*1.05,[[0,'rgba(0,0,0,0.6)'],[1,'rgba(0,0,0,0)']]); dot(c,0,0,R*1.05); c.restore();
   c.save(); c.translate(cx,cy+R*1.2); c.rotate(v.wob); c.translate(0,-R*1.2);
@@ -1989,7 +2017,7 @@ function drawGlobe(c,cx,cy,R,g,v,t,o={}){
   if(o.visitor) drawVisitor(c,o.visitor.type,t);
   if(gd.kind==='ember') c.globalCompositeOperation='lighter';
   for(const f of v.fl){
-    let a=f.a; if(gd.sp) a*=0.45+0.55*Math.abs(Math.sin(t*3+f.ph*3));
+    let a=f.a*Math.min(1,f.age*2); if(gd.sp) a*=0.45+0.55*Math.abs(Math.sin(t*3+f.ph*3));
     c.fillStyle=gd.rb?`hsl(${(f.ph*57+t*20)%360},90%,82%)`:`rgb(${gd.c})`;
     c.globalAlpha=a; c.beginPath();
     if(gd.kind==='blood') c.ellipse(f.x,f.y,f.r*0.65,f.r*1.6,0,0,TAU);
@@ -2002,6 +2030,7 @@ function drawGlobe(c,cx,cy,R,g,v,t,o={}){
   if(v.flash>0) glow(c,0,0.1,1.1,v.fc||'255,250,235',(v.fc?0.8:0.55)*v.flash);
   c.restore();
   drawGlass(c,R);
+  if(g.sweat) drawSweat(c,R,g.sweat,t);
   if(g.dt) drawDirt(c,R,g.dt);
   if(g.cr) drawCracks(c,R,g.cr);
   drawBase(c,R,g.b||0,o.plate,t);
@@ -2244,7 +2273,36 @@ function updCharges(){
   if(S.charges>=BAL.shakeMax) S.chargeAt=Date.now();
 }
 function dayCheck(){if(S.lim.day!==dayKey()){S.lim.day=dayKey();S.lim.visits=0;S.lim.gifts=0}}
-function summary(){const G=goalNow(); return {name:Net.user.name,legacy:S.legacy||0,g:{...S.globe,gl:S.gl,dt:Math.round((S.dirt||0)*10)/10},sealed:S.sealed.slice(-12),pool:S.pool,own:S.own,goal:{week:G.week,done:myDone()},at:Date.now()}}
+/* ---------- Tryhard tracking ---------- */
+let OVER=0, lastInput=0, pest=[];
+['pointerdown','keydown','wheel'].forEach(ev=>addEventListener(ev,()=>{lastInput=Date.now()},{passive:true}));
+addEventListener('pointermove',e=>{if(e.buttons) lastInput=Date.now()},{passive:true});
+const hourNow=()=>Math.floor(Date.now()/3600000);
+function activeMin(){S.act=S.act||{}; const h=hourNow(); let sec=0; for(const [k,v] of Object.entries(S.act)) if(+k>h-24) sec+=v; return sec/60}
+function trackActive(dt){
+  if(document.hidden||RS.open||Date.now()-lastInput>120000) return;
+  S.act=S.act||{}; const h=hourNow(); S.act[h]=(S.act[h]||0)+dt;
+}
+function breakLeft(){
+  const h=hourNow(), lim=BAL.tryhardMinutes*60; let rem=0; for(const [k,v] of Object.entries(S.act||{})) if(+k>h-24) rem+=v;
+  if(rem<=lim) return 0;
+  for(let k=h-23;k<=h;k++){rem-=(S.act[k]||0); if(rem<=lim) return Math.max(60000,(k+24)*3600000-Date.now())}
+  return 86400000;
+}
+function sweatTier(){const m=activeMin(); let t=0; BAL.sweatTiers.forEach(([min],k)=>{if(m>=min) t=k+1}); return t}
+const sweatName=t=>t?BAL.sweatTiers[t-1][1]:'';
+function updateTryhard(){
+  for(const k of Object.keys(S.act||{})) if(+k<hourNow()-25) delete S.act[k];
+  const was=OVER; OVER=sweatTier();
+  if(OVER>was){
+    const m=Math.round(activeMin());
+    toast([`You’ve played ${m} minutes today. Your globe is sweating.`,`${Math.round(m/60)} hours today. The clan now knows you as a Tryhard.`,`${Math.round(m/60)} hours today. Touch grass.`][OVER-1]);
+    dayCheck(); S.lim.sweat=S.lim.sweat||{};
+    if(S.lim.sweat[OVER]!==S.lim.day){S.lim.sweat[OVER]=S.lim.day; Net.send({type:'tired',item:sweatName(OVER),text:String(m)})}
+    publish(true);
+  } else if(OVER!==was) publish(true);
+}
+function summary(){const G=goalNow(); return {name:Net.user.name,legacy:S.legacy||0,g:{...S.globe,gl:S.gl,dt:Math.round((S.dirt||0)*10)/10,sweat:OVER,dizzy:S.dizzyUntil>Date.now()?1:0},sealed:S.sealed.slice(-12),pool:S.pool,own:S.own,goal:{week:G.week,done:myDone()},at:Date.now()}}
 
 /* =========================================================
    CLAN GOALS: same tasks for everyone, decided by clan code and week.
@@ -2360,7 +2418,7 @@ function toast(msg){const d=document.createElement('div');d.className='toast';d.
 function shake(){
   const v=mainView;
   v.swirl=Math.min(1.6,v.swirl+0.9); v.wobV+=(Math.random()<0.5?-1:1)*0.7;
-  for(const f of v.fl){f.vy-=Math.random()*0.7;f.vx+=(Math.random()-0.5)*0.9}
+  for(const f of v.fl){f.vy+=(Math.random()-0.6)*0.8;f.vx+=(Math.random()-0.5)*1.0}
   updCharges();
   if(S.charges>0){
     if(S.charges===BAL.shakeMax) S.chargeAt=Date.now();
@@ -2369,6 +2427,13 @@ function shake(){
     omenRoll(BAL.omenShake);
     floaters.push({x:G.cx+(Math.random()-0.5)*G.R*0.6,y:G.cy-G.R*0.35,txt:'+'+fmt(gain),life:1});
     saveSoon();
+  }
+  else if(!(S.globe.cr>0)){
+    const n=Date.now(); pest=pest.filter(x=>n-x<600000); pest.push(n);
+    if(pest.length>=BAL.pesterLimit&&!(S.dizzyUntil>n)){
+      S.dizzyUntil=n+BAL.dizzyMinutes*60000; pest=[];
+      toast('Whoa. Your globe is dizzy from all that shaking.'); saveSoon(); publish(true);
+    }
   }
   if(!S.shook){S.shook=true;$('#hint').classList.add('gone')}
 }
@@ -2451,6 +2516,8 @@ function feedLine(e){
     case 'raidwin': return `The clan beat ${esc((BOSSES[e.item]||{n:'the boss'}).n)}`;
     case 'raidlose': return `${esc((BOSSES[e.item]||{n:'The boss'}).n)} broke through and cracked every globe`;
     case 'mend': return `${f} mended a crack in ${to==='you'?'your':to+'’s'} globe`;
+    case 'tired': {const who=f==='You'?'You':f, are=f==='You'?'are':'is', need=f==='You'?'need':'needs', m=+e.text||0, when=m>=120?`${Math.round(m/60)} hours today`:`${m} minutes today`;
+      return e.item==='Tryhard'?`${who} ${are} officially a Tryhard (${when})`:e.item==='Touch grass'?`${who} ${need} to touch grass (${when})`:`${who} ${are} sweating (${when})`}
     case 'ending': return `${f==='You'?'Your':f+'’s'} cat knocked ${f==='You'?'your':'their'} last globe off the shelf. The end`;
     case 'goalpart': return `${f} finished ${f==='You'?'your':'their'} part of the clan goal`;
     case 'goaldone': return 'The clan completed this week’s goal';
@@ -2481,7 +2548,7 @@ function updateHud(force){
   else if(S.globe.cr){$('#hint').textContent='Your glass is cracked. Keep tapping the globe to mend it'; $('#hint').classList.remove('gone')}
   $('#gsub').textContent=`Globe no. ${S.no}, ${S.globe.p} of 8 parts`;
   const v=myVisitor();
-  $('#gvis').textContent=[v?`A ${VISITORS[v.type].n} from ${v.fromName} is visiting, +20% snow for ${dur(v.until-Date.now())}`:'',S.blessUntil>Date.now()?`Clan goal reward, +25% snow for ${dur(S.blessUntil-Date.now())}`:S.partUntil>Date.now()?`Clan goal effort, +10% snow for ${dur(S.partUntil-Date.now())}`:'',S.dirt>0.15?`Grimy glass, −${Math.round(S.dirt*BAL.dirtPenalty*100)}% snow`:'',S.globe.cr?`${S.globe.cr} ${S.globe.cr===1?'crack':'cracks'} in the glass, −${S.globe.cr*Math.round(BAL.crackPenalty*100)}% snow. Tap the globe to mend (${S.mend||0} of ${BAL.mendTaps})`:''].filter(Boolean).join('. ');
+  $('#gvis').textContent=[v?`A ${VISITORS[v.type].n} from ${v.fromName} is visiting, +20% snow for ${dur(v.until-Date.now())}`:'',S.blessUntil>Date.now()?`Clan goal reward, +25% snow for ${dur(S.blessUntil-Date.now())}`:S.partUntil>Date.now()?`Clan goal effort, +10% snow for ${dur(S.partUntil-Date.now())}`:'',OVER?`${sweatName(OVER)}: you’ve played ${Math.round(activeMin())} minutes today`:'',S.dizzyUntil>Date.now()?'Your globe is dizzy. Give it a moment':'',S.dirt>0.15?`Grimy glass, −${Math.round(S.dirt*BAL.dirtPenalty*100)}% snow`:'',S.globe.cr?`${S.globe.cr} ${S.globe.cr===1?'crack':'cracks'} in the glass, −${S.globe.cr*Math.round(BAL.crackPenalty*100)}% snow. Tap the globe to mend (${S.mend||0} of ${BAL.mendTaps})`:''].filter(Boolean).join('. ');
   document.querySelectorAll('[data-cost]').forEach(b=>{b.disabled=S.flakes<+b.dataset.cost});
 }
 
@@ -2673,7 +2740,8 @@ function drawStage(t,dt){
   G={cx,cy,R};
   roomBackdrop(c,W,H,cx,surf,R);
   c.fillStyle=rg(c,cx,cy,R*0.6,cx,cy,R*1.7,[[0,'rgba(160,190,255,0.12)'],[1,'rgba(160,190,255,0)']]); c.fillRect(0,0,W,H);
-  drawGlobe(c,cx,cy,R,{...S.globe,gl:S.gl,dt:S.dirt},mainView,t,{plate:true,visitor:myVisitor()});
+  if(S.dizzyUntil>Date.now()){mainView.spin=1.5; mainView.swirl=Math.max(mainView.swirl,0.7); if(!reduceMotion) mainView.wobV+=Math.sin(t*3)*dt*2} else mainView.spin=0;
+  drawGlobe(c,cx,cy,R,{...S.globe,gl:S.gl,dt:S.dirt,sweat:OVER},mainView,t,{plate:true,visitor:myVisitor()});
   for(let i=wipeSparks.length-1;i>=0;i--){const w=wipeSparks[i]; w.life-=dt; if(w.life<=0){wipeSparks.splice(i,1);continue} c.fillStyle=`rgba(255,255,255,${w.life/0.6})`; c.fillRect(w.x-6,w.y-1,12,2); c.fillRect(w.x-1,w.y-6,2,12)}
   c.font=`600 ${Math.round(Math.max(16,R*0.1))}px Fraunces, Georgia, serif`; c.textAlign='center';
   for(let i=floaters.length-1;i>=0;i--){const f=floaters[i]; f.life-=dt*0.6; f.y-=30*dt; if(f.life<=0){floaters.splice(i,1);continue} c.fillStyle=`rgba(255,243,214,${f.life})`; c.fillText(f.txt,f.x,f.y)}
@@ -2704,11 +2772,15 @@ function drawCabinet(t,dt){
   for(let r=0;r<rows;r++) shelf(c,W,pad+r*sh+R*2.22+8);
   mem.forEach((m,i)=>{
     const r=Math.floor(i/cols), k=i%cols, y0=pad+r*sh, shelfY=y0+R*2.22+8, cx=k*sw+sw/2, isMe=m.id===Net.user.uid;
-    const g=isMe?{...S.globe,gl:S.gl,dt:S.dirt}:m.g, v=viewFor(m.id);
+    const g=isMe?{...S.globe,gl:S.gl,dt:S.dirt,sweat:OVER}:m.g, v=viewFor(m.id);
+    if(g.dizzy&&!isMe){v.spin=1.5; v.swirl=Math.max(v.swirl,0.7)}
     stepView(v,dt,Math.round(flakeN(g.s)*0.5),t);
     const vis=m.visitor&&m.visitor.until>Date.now()?m.visitor:null;
     drawGlobe(c,cx,shelfY-R*1.2,R,g,v,t,{visitor:vis});
     plateText(c,cx,shelfY+2,(isMe?'You':m.name)+((isMe?S.legacy:m.legacy)?' ★'+(isMe?S.legacy:m.legacy):''),isMe);
+    if(g.sweat){const lab=sweatName(g.sweat); c.font='700 10px "Nunito Sans", sans-serif'; const lw=c.measureText(lab).width+14;
+      rr(c,cx-lw/2,shelfY-R*2.42-2,lw,15,7.5); c.fillStyle=['','#3a7bd5','#e0662b','#2f8a4a'][g.sweat]; c.fill();
+      c.fillStyle='#fff'; c.textAlign='center'; c.textBaseline='middle'; c.fillText(lab,cx,shelfY-R*2.42+5.5)}
     slots.push({x:k*sw,y:y0,w:sw,h:sh,id:m.id});
   });
   if(n2){
@@ -2742,11 +2814,8 @@ function drawOverlay(t,dt){
 const gateView=newView(); let gateG=null, gateNext=0;
 function drawGate(t,dt){
   const cv=$('#gatec'), W=innerWidth, H=innerHeight, c=fit(cv,W,H);
-  if(t>gateNext){
-    gateNext=t+7; const gro=ITEM_KEYS.filter(k=>ITEMS[k].slot==='G'), sky=ITEM_KEYS.filter(k=>ITEMS[k].slot==='S');
-    gateG={th:pick(THEME_KEYS),p:8,s:6,b:2+Math.floor(Math.random()*4),k:1+Math.floor(Math.random()*3),gl:pick(GLITTER).id,eq:{L:pick(gro),R:pick(gro),S:pick(sky)}};
-    gateView.swirl=1.3; gateView.flash=0.5;
-  }
+  if(!gateG) gateG={th:'empty',p:1,s:6,b:1,k:1,gl:'white',eq:{}};
+  if(t>gateNext){gateNext=t+8; gateView.swirl=1.2; gateView.wobV+=0.5}
   const R=Math.min(W*0.3,H*0.19,170), cx=W/2, cy=Math.min(H*0.24,R*1.25+20), surf=cy+R*1.2;
   roomBackdrop(c,W,H,cx,surf,R);
   stepView(gateView,dt,flakeN(6),t);
@@ -2826,7 +2895,7 @@ let itemsT=null; function renderItemsSoon(){clearTimeout(itemsT); itemsT=setTime
 let goalT=null; function goalSoon(){clearTimeout(goalT); goalT=setTimeout(()=>{if(tab==='clan') renderGoal()},400)}
 setInterval(()=>{if(started){checkGoal(); processEndedRaids(); updateRaidBanner(); if(tab==='clan'){renderGoal(); renderRaidBox()}}},15000);
 
-let lastT=performance.now(), saveT=0;
+let lastT=performance.now(), saveT=0, TH=0;
 function frame(now){
   const dt=Math.min(0.05,(now-lastT)/1000); lastT=now; const t=now/1000;
   if(!started){ if(!$('#gate').hidden) drawGate(t,dt); requestAnimationFrame(frame); return }
@@ -2834,6 +2903,7 @@ function frame(now){
   stepView(mainView,dt,flakeN(S.globe.s),t);
   drawStage(t,dt);
   S.dirt=Math.min(1,(S.dirt||0)+dt/(BAL.dirtHours*3600));
+  trackActive(dt); TH=(TH||0)+dt; if(TH>2){TH=0; updateTryhard()}
   if(END.on) drawEnding(t,dt);
   if(RS.open){raidStep(dt); drawRaid(t,dt)}
   if(tab==='clan'&&!RS.open) drawCabinet(t,dt);
