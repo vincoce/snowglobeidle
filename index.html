@@ -110,6 +110,17 @@ input[type=text],input[type=password]{flex:1;min-width:0;font:15px 'Nunito Sans'
 .rresult{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(8,10,22,.6)}
 .rresult[hidden]{display:none}
 .rresult .card{padding:20px 18px}
+.hearthpane{display:flex;flex-direction:column}
+.hearthpane[hidden]{display:none}
+.hacts{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.hacts button{font:700 13px 'Nunito Sans',sans-serif;background:var(--btn);color:var(--btn-ink);border:0;border-radius:8px;padding:9px 12px;cursor:pointer}
+.pourpick{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.pourpick[hidden]{display:none}
+.pourpick button{font:700 13px 'Nunito Sans',sans-serif;padding:7px 10px;border-radius:8px;cursor:pointer}
+.chat{list-style:none;margin:0;padding:8px 10px;border:1px solid var(--line);border-radius:10px;flex:1;min-height:220px;max-height:46vh;overflow:auto}
+.chat li{padding:5px 0;font-size:14px;line-height:1.4}
+.chat li small{color:var(--muted);font-size:11px;margin-left:6px}
+.chat li i{color:var(--muted)}
 .feed{list-style:none;margin:8px 0 0;padding:0}
 .feed li{padding:9px 2px;border-bottom:1px solid var(--line);font-size:14px}
 .feed li small{display:block;color:var(--muted);font-size:12px}
@@ -200,10 +211,19 @@ input[type=text],input[type=password]{flex:1;min-width:0;font:15px 'Nunito Sans'
       <button role="tab" aria-selected="false" data-tab="style">Style</button>
       <button role="tab" aria-selected="false" data-tab="items">Collection</button>
       <button role="tab" aria-selected="false" data-tab="clan">Clan</button>
+      <button role="tab" aria-selected="false" data-tab="hearth">Hearth</button>
     </nav>
     <div class="pane" id="pane-parts"></div>
     <div class="pane" id="pane-style" hidden></div>
     <div class="pane" id="pane-items" hidden></div>
+    <div class="pane hearthpane" id="pane-hearth" hidden>
+      <h3>The hearth</h3>
+      <p class="lead" id="hearthStatus"></p>
+      <div class="hacts"><button data-act="log">Add a log</button><button data-act="pour">Pour mulled wine</button><button data-act="cheers">Cheers</button></div>
+      <div class="pourpick" id="pourPick" hidden></div>
+      <ul class="chat" id="chatList"></ul>
+      <div class="inrow"><input type="text" id="chatIn" maxlength="200" placeholder="Say something by the fire" aria-label="Chat message"><button data-act="say">Send</button></div>
+    </div>
     <div class="pane" id="pane-clan" hidden>
       <h3 id="clanTitle"></h3>
       <p class="lead" id="clanInvite"></p>
@@ -282,6 +302,9 @@ const BAL = {
   friendShakeHours:4, friendShakeMinutes:10,
   visitHours:8, visitBonus:0.2, visitsPerDay:1, giftsPerDay:1, noteGapMin:5,
   poolGround:5, poolSky:2, clanMax:12,
+  // the hearth: each log burns logBurnMin (stacking up to fireMaxHours), a mug lasts mugMinutes,
+  // sitting by a lit stove gives warmBonus
+  logBurnMin:45, fireMaxHours:3, mugMinutes:15, logGapMin:20, pourGapMin:5, warmBonus:0.1,
   // cursed relics: chance per roll, and a guarantee after this many rolls
   omenShake:0.03, omenReceived:0.05, omenPart:0.06, omenSeal:0.5, omenPity:45,
   // weekly clan goal: everyone must finish every task
@@ -1892,6 +1915,212 @@ function rebirth(){
   showOv();
 }
 
+
+/* =========================================================
+   THE HEARTH: clan chat by the stove, with mulled wine
+   ========================================================= */
+let CHAT=[], chatUnread=0, hearthRegions=[], pourPick=false;
+const hearthSnow=[]; for(let i=0;i<40;i++) hearthSnow.push({x:Math.random(),y:Math.random(),r:0.6+Math.random()*1.6,sp:0.03+Math.random()*0.05,ph:Math.random()*TAU});
+const HAT_COLS=['#c8344a','#2f5fa8','#2f7d4f','#e3b341','#7a4ab0','#d9682a','#3aa0a0','#b03a7a','#5a6e8a','#8a5a2a','#e06a8a','#4a8a3a'];
+const SKIN=['#f2d0b0','#e6b896','#c99470','#a87454','#7a5038','#f5dcc4'];
+const SWEATER=['#b8323f','#3a6ab0','#3f8a52','#c9962e','#7a5ab0','#c96a2d','#2f9a9a','#a83a6a','#5a7a9a','#8a5a2a','#d0607a','#4a9a3a'];
+function hearthPresent(){
+  const now=Date.now(), out=[];
+  for(const m of Net.members){
+    const me=m.id===Net.user.uid;
+    if(me?tab==='hearth':(m.hearth&&now-m.hearth<75000)) out.push({id:m.id,name:me?'You':m.name,me});
+  }
+  if(tab==='hearth'&&!out.some(x=>x.me)) out.push({id:Net.user.uid,name:'You',me:true});
+  return out.sort((a,b)=>hashStr(a.id)-hashStr(b.id)).slice(0,12);
+}
+function fireUntil(){
+  const logs=CHAT.filter(c=>c.kind==='log').map(c=>c.at).sort((a,b)=>a-b); let until=0;
+  for(const at of logs) until=Math.min(Math.max(until,at)+BAL.logBurnMin*60000,at+BAL.fireMaxHours*3600000);
+  return until;
+}
+const fireLevel=()=>Math.max(0,Math.min(1,(fireUntil()-Date.now())/(BAL.logBurnMin*60000*1.5)));
+function mugHolders(){
+  const now=Date.now(), held={};
+  for(const c of CHAT) if(c.kind==='pour'&&now-c.at<BAL.mugMinutes*60000){const who=c.to||c.from; if(!held[who]||held[who]<c.at) held[who]=c.at}
+  return held;
+}
+function lastCheers(){const c=CHAT.find(x=>x.kind==='cheers'); return c?c.at:0}
+function warmNow(){return tab==='hearth'&&!document.hidden&&fireLevel()>0}
+
+function drawAvatar(c,x,y,a,p,st){
+  const k=hashStr(p.id), hat=HAT_COLS[k%HAT_COLS.length], skin=SKIN[(k>>>3)%SKIN.length], sw=SWEATER[(k>>>6)%SWEATER.length];
+  const bob=reduceMotion?0:Math.sin(st.t*1.3+k)*a*0.03;
+  c.save(); c.translate(x,y+bob);
+  c.fillStyle='rgba(0,0,0,0.25)'; ell(c,0,a*1.55,a*1.3,a*0.28);
+  c.fillStyle='#6a3f22'; rr(c,-a*1.1,a*1.05,a*2.2,a*0.45,a*0.15); c.fill();
+  const torso=()=>{c.beginPath(); c.moveTo(-a*0.95,a*1.15); c.quadraticCurveTo(-a*1.05,a*0.2,-a*0.55,-a*0.05); c.lineTo(a*0.55,-a*0.05); c.quadraticCurveTo(a*1.05,a*0.2,a*0.95,a*1.15); c.closePath()};
+  c.fillStyle=sw; torso(); c.fill(); c.fillStyle=lg(c,-a,0,a,0,[[0,'rgba(255,255,255,0.12)'],[1,'rgba(0,0,0,0.3)']]); torso(); c.fill();
+  c.fillStyle='rgba(255,255,255,0.18)'; for(let i=0;i<3;i++) c.fillRect(-a*0.8,a*(0.35+i*0.22),a*1.6,a*0.05);
+  const mug=st.mug, raise=st.cheers?Math.min(1,st.cheers):0;
+  if(mug){
+    const mx=raise?a*0.55:0, my=raise?-a*0.9:a*0.45;
+    c.strokeStyle=sw; c.lineWidth=a*0.32; c.lineCap='round';
+    c.beginPath(); c.moveTo(-a*0.6,a*0.25); c.quadraticCurveTo(-a*0.4,a*0.6,mx-a*0.15,my+a*0.1); c.moveTo(a*0.6,a*0.25); c.quadraticCurveTo(a*0.6,a*0.5,mx+a*0.15,my+a*0.1); c.stroke();
+    c.fillStyle=skin; dot(c,mx-a*0.18,my+a*0.12,a*0.14); dot(c,mx+a*0.18,my+a*0.12,a*0.14);
+    c.fillStyle='#b8323f'; rr(c,mx-a*0.2,my-a*0.25,a*0.4,a*0.42,a*0.08); c.fill();
+    c.strokeStyle='#b8323f'; c.lineWidth=a*0.07; c.beginPath(); c.arc(mx+a*0.22,my-a*0.04,a*0.1,-Math.PI/2,Math.PI/2); c.stroke();
+    c.fillStyle='#f4efe4'; c.fillRect(mx-a*0.2,my-a*0.12,a*0.4,a*0.06);
+    c.fillStyle='#5a0f18'; ell(c,mx,my-a*0.25,a*0.2,a*0.05);
+    c.fillStyle='#f29a2e'; dot(c,mx+a*0.12,my-a*0.27,a*0.07);
+    c.strokeStyle='#6a3f22'; c.lineWidth=a*0.04; c.beginPath(); c.moveTo(mx-a*0.1,my-a*0.25); c.lineTo(mx-a*0.16,my-a*0.45); c.stroke();
+    for(let i=0;i<2;i++){const ph=((st.t*0.5)+i*0.5+k*0.1)%1; c.strokeStyle=`rgba(255,255,255,${0.35*(1-ph)})`; c.lineWidth=a*0.04; c.beginPath(); c.moveTo(mx-a*0.05+i*a*0.1,my-a*0.3); c.quadraticCurveTo(mx+Math.sin(ph*6+i)*a*0.15,my-a*0.3-ph*a*0.5,mx,my-a*0.35-ph*a*0.7); c.stroke()}
+  } else {
+    c.fillStyle=skin; dot(c,-a*0.25,a*0.75,a*0.15); dot(c,a*0.25,a*0.75,a*0.15);
+  }
+  c.fillStyle=skin; dot(c,0,-a*0.55,a*0.62);
+  c.fillStyle='rgba(230,110,110,0.35)'; dot(c,-a*0.33,-a*0.42,a*0.13); dot(c,a*0.33,-a*0.42,a*0.13);
+  const bl=Math.sin(st.t*0.9+k)>0.97?0.15:1;
+  c.fillStyle='#2a1a14'; ell(c,-a*0.2,-a*0.58,a*0.07,a*0.09*bl); ell(c,a*0.2,-a*0.58,a*0.07,a*0.09*bl);
+  c.strokeStyle='#2a1a14'; c.lineWidth=a*0.06; c.lineCap='round'; c.beginPath();
+  if(st.talk&&!reduceMotion&&Math.sin(st.t*14)>0){c.fillStyle='#5a2020'; ell(c,0,-a*0.33,a*0.11,a*0.08)} else c.arc(0,-a*0.4,a*0.16,0.2,Math.PI-0.2);
+  c.stroke();
+  c.fillStyle=hat; c.beginPath(); c.moveTo(-a*0.62,-a*0.7); c.quadraticCurveTo(-a*0.6,-a*1.45,0,-a*1.5); c.quadraticCurveTo(a*0.6,-a*1.45,a*0.62,-a*0.7); c.closePath(); c.fill();
+  c.fillStyle='rgba(255,255,255,0.85)'; rr(c,-a*0.66,-a*0.82,a*1.32,a*0.2,a*0.1); c.fill();
+  c.fillStyle='#f4efe4'; dot(c,0,-a*1.52,a*0.18);
+  c.restore();
+  c.font=`700 ${Math.max(10,Math.round(a*0.42))}px "Nunito Sans", sans-serif`; c.textAlign='center'; c.textBaseline='top';
+  const w=c.measureText(p.name).width+12;
+  c.fillStyle=p.me?'rgba(255,210,122,0.92)':'rgba(20,16,24,0.6)'; rr(c,x-w/2,y+a*1.62,w,a*0.62,a*0.3); c.fill();
+  c.fillStyle=p.me?'#2a1a0c':'#f3ead8'; c.fillText(p.name,x,y+a*1.7);
+  if(st.say){
+    const txt=st.say.length>42?st.say.slice(0,40)+'…':st.say;
+    c.font=`600 ${Math.max(11,Math.round(a*0.46))}px "Nunito Sans", sans-serif`;
+    const tw=Math.min(c.measureText(txt).width,a*9)+20, bx=x-tw/2, by=y-a*2.85, bh=a*0.9;
+    c.globalAlpha=st.sayA;
+    c.fillStyle='rgba(255,252,244,0.96)'; rr(c,bx,by,tw,bh,bh*0.4); c.fill();
+    c.beginPath(); c.moveTo(x-a*0.18,by+bh-1); c.lineTo(x,by+bh+a*0.28); c.lineTo(x+a*0.18,by+bh-1); c.fill();
+    c.fillStyle='#2a1d13'; c.textBaseline='middle'; c.fillText(txt,x,by+bh/2,a*9);
+    c.globalAlpha=1;
+  }
+}
+function drawHearth(t,dt){
+  const st0=$('#stage'), W=st0.clientWidth, H=st0.clientHeight; if(!W||!H) return;
+  const c=fit(gcv,W,H), s=Math.min(W,H*1.25), floorY=H*0.64, fl=fireLevel(), lit=fl>0;
+  hearthRegions=[];
+  c.fillStyle=lg(c,0,0,0,floorY,[[0,'#3a2416'],[1,'#5a3a22']]); c.fillRect(0,0,W,floorY);
+  for(let y=floorY-14;y>-20;y-=26){c.fillStyle='rgba(0,0,0,0.22)'; c.fillRect(0,y+10,W,4); c.fillStyle='rgba(255,220,170,0.07)'; c.fillRect(0,y-10,W,3)}
+  const wx=W*0.06, wy=H*0.12, ww=Math.min(W*0.22,s*0.26), wh=H*0.32;
+  c.fillStyle=lg(c,0,wy,0,wy+wh,[[0,'#0c1430'],[1,'#2a3a66']]); c.fillRect(wx,wy,ww,wh);
+  c.save(); c.beginPath(); c.rect(wx,wy,ww,wh); c.clip();
+  c.fillStyle='#e8eef8'; c.beginPath(); c.ellipse(wx+ww*0.5,wy+wh*1.05,ww*0.9,wh*0.25,0,0,TAU); c.fill();
+  c.fillStyle='rgba(255,255,255,0.9)';
+  for(const f of hearthSnow){f.y+=f.sp*dt; if(f.y>1) {f.y=0; f.x=Math.random()} dot(c,wx+((f.x+Math.sin(t*0.7+f.ph)*0.02)%1)*ww,wy+f.y*wh,f.r)}
+  c.restore();
+  c.strokeStyle='#4a2c19'; c.lineWidth=8; c.strokeRect(wx,wy,ww,wh);
+  c.lineWidth=4; c.beginPath(); c.moveTo(wx+ww/2,wy); c.lineTo(wx+ww/2,wy+wh); c.moveTo(wx,wy+wh/2); c.lineTo(wx+ww,wy+wh/2); c.stroke();
+  c.fillStyle='#f4f8ff'; c.fillRect(wx-6,wy+wh,ww+12,7);
+  c.fillStyle=lg(c,0,floorY,0,H,[[0,'#6a4128'],[1,'#3a2214']]); c.fillRect(0,floorY,W,H-floorY);
+  c.strokeStyle='rgba(0,0,0,0.25)'; c.lineWidth=2; for(let i=1;i<9;i++){const yy=floorY+(H-floorY)*(i/9)**1.4; c.beginPath(); c.moveTo(0,yy); c.lineTo(W,yy); c.stroke()}
+  const sx=W/2, sw=s*0.17, sh=s*0.19, sb=floorY+s*0.01, stTop=sb-sh;
+  c.fillStyle='#7a2a2a'; c.beginPath(); c.ellipse(sx,sb+s*0.12,s*0.42,s*0.11,0,0,TAU); c.fill();
+  c.strokeStyle='#c9a24a'; c.lineWidth=3; c.beginPath(); c.ellipse(sx,sb+s*0.12,s*0.38,s*0.09,0,0,TAU); c.stroke();
+  c.fillStyle='#1c1c22'; c.fillRect(sx-sw*0.08,0,sw*0.16,stTop);
+  c.fillStyle='#2a2a32'; for(const yy of [stTop*0.3,stTop*0.7]) c.fillRect(sx-sw*0.1,yy,sw*0.2,6);
+  c.fillStyle='#16161a'; for(const dx of [-0.42,0.36]) c.fillRect(sx+dx*sw,sb-s*0.02,sw*0.06,s*0.03);
+  c.fillStyle=lg(c,sx-sw/2,0,sx+sw/2,0,[[0,'#3a3a44'],[0.5,'#24242c'],[1,'#141418']]); rr(c,sx-sw/2,stTop,sw,sh-s*0.02,sw*0.08); c.fill();
+  c.fillStyle='#2e2e36'; c.fillRect(sx-sw*0.56,stTop-s*0.012,sw*1.12,s*0.02);
+  const fx=sx-sw*0.3, fy=stTop+sh*0.28, fw=sw*0.6, fh=sh*0.45;
+  c.fillStyle='#0a0606'; rr(c,fx,fy,fw,fh,fw*0.12); c.fill();
+  c.save(); rr(c,fx,fy,fw,fh,fw*0.12); c.clip();
+  if(lit){
+    c.fillStyle='#4a2c19'; c.fillRect(fx+fw*0.1,fy+fh*0.78,fw*0.8,fh*0.12);
+    for(let i=0;i<4;i++) flame(c,fx+fw*(0.2+i*0.2),fy+fh*0.85,fw*0.12,fh*(0.45+0.4*fl),t,i);
+  } else {
+    c.fillStyle='rgba(255,90,30,0.5)'; for(let i=0;i<6;i++) dot(c,fx+fw*(0.15+i*0.14),fy+fh*0.85,2+Math.sin(t*2+i)*1);
+  }
+  c.restore();
+  c.strokeStyle='#4a4a54'; c.lineWidth=3; rr(c,fx,fy,fw,fh,fw*0.12); c.stroke();
+  c.beginPath(); c.moveTo(fx+fw/2,fy); c.lineTo(fx+fw/2,fy+fh); c.stroke();
+  hearthRegions.push({x:sx-sw/2,y:stTop,w:sw,h:sh,act:'log'});
+  const px=sx, pw=sw*0.62, ph=s*0.07, py=stTop-s*0.012-ph;
+  c.fillStyle=lg(c,px-pw/2,0,px+pw/2,0,[[0,'#c8703a'],[0.5,'#9a4a2a'],[1,'#5a2a14']]); rr(c,px-pw/2,py,pw,ph,ph*0.25); c.fill();
+  c.fillStyle='#4a0c14'; c.beginPath(); c.ellipse(px,py+2,pw/2,ph*0.18,0,0,TAU); c.fill();
+  c.fillStyle='#f29a2e'; dot(c,px-pw*0.15,py+1,ph*0.12); dot(c,px+pw*0.18,py+2,ph*0.1);
+  c.strokeStyle='#c9c4b8'; c.lineWidth=3; c.beginPath(); c.moveTo(px+pw*0.1,py+2); c.lineTo(px+pw*0.55,py-ph*0.9); c.stroke();
+  for(let i=0;i<4;i++){const ph2=((t*0.35)+i/4)%1; c.strokeStyle=`rgba(255,255,255,${0.3*(1-ph2)*(lit?1:0.4)})`; c.lineWidth=3; c.beginPath(); c.moveTo(px-pw*0.25+i*pw*0.16,py); c.bezierCurveTo(px-pw*0.3+i*pw*0.16+Math.sin(ph2*6+i)*10,py-ph2*s*0.08,px-pw*0.2+i*pw*0.16,py-ph2*s*0.12,px-pw*0.25+i*pw*0.16+Math.sin(ph2*4)*12,py-ph2*s*0.16); c.stroke()}
+  hearthRegions.push({x:px-pw/2,y:py-ph,w:pw,h:ph*2,act:'pourme'});
+  c.save(); c.translate(sx+sw*0.85,sb+s*0.045); c.scale(s*0.7,s*0.7); drSleepCat(c,t); c.restore();
+  if(lit){
+    c.save(); c.globalCompositeOperation='lighter';
+    c.fillStyle=rg(c,sx,fy+fh/2,0,sx,fy+fh/2,s*0.9,[[0,`rgba(255,150,60,${0.32*fl+0.08})`],[0.4,`rgba(255,120,40,${0.12*fl})`],[1,'rgba(255,120,40,0)']]); c.fillRect(0,0,W,H);
+    c.restore();
+  } else {c.fillStyle='rgba(20,30,70,0.35)'; c.fillRect(0,0,W,H)}
+  const ppl=hearthPresent(), held=mugHolders(), ch=Date.now()-lastCheers(), now=Date.now();
+  const SEATS=[[-0.27,0.03],[0.27,0.03],[-0.4,0.13],[0.4,0.13],[-0.17,0.2],[0.17,0.2],[-0.47,0.26],[0.47,0.26],[-0.33,0.3],[0.33,0.3],[-0.07,0.33],[0.07,0.33]];
+  const a=s*0.05;
+  const placed=ppl.map((p,i)=>({p,x:sx+SEATS[i][0]*s,y:floorY+SEATS[i][1]*s})).sort((u,v)=>u.y-v.y);
+  for(const {p,x,y} of placed){
+    const msg=CHAT.find(m=>m.kind==='msg'&&m.from===p.id&&now-m.at<9000);
+    const mug=!!held[p.id], cheers=mug&&ch<3500?Math.sin(Math.min(1,ch/600)*Math.PI/2):0;
+    drawAvatar(c,x,y,a,p,{t,mug,cheers,say:msg?msg.text:(cheers&&ch<2500?'Cheers!':''),sayA:msg?Math.min(1,(9000-(now-msg.at))/1200):1,talk:!!msg&&now-msg.at<2500});
+    if(!p.me) hearthRegions.push({x:x-a*1.2,y:y-a*1.6,w:a*2.4,h:a*3.4,act:'pourfor',id:p.id});
+  }
+  if(!lit){c.fillStyle='rgba(243,234,216,0.9)'; c.font=`600 ${Math.round(s*0.035)}px Fraunces, Georgia, serif`; c.textAlign='center'; c.textBaseline='alphabetic'; c.fillText('The fire went out. Tap the stove to add a log.',W/2,H*0.97)}
+}
+function hearthTap(x,y){
+  for(let i=hearthRegions.length-1;i>=0;i--){const r=hearthRegions[i]; if(x>=r.x&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h){
+    if(r.act==='log') hearthAct('log'); else if(r.act==='pourme') hearthAct('pour',Net.user.uid); else if(r.act==='pourfor') hearthAct('pour',r.id); return}}
+}
+function hearthAct(kind,to){
+  const now=Date.now(); S.lim.hearth=S.lim.hearth||{};
+  const L=S.lim.hearth, gap={log:BAL.logGapMin,pour:BAL.pourGapMin,cheers:1}[kind]*60000, wait=gap-(now-(L[kind]||0));
+  if(wait>0){toast(kind==='log'?`You added a log recently. Try again in ${dur(wait)}.`:kind==='pour'?`Let the last mug go round first. Pour again in ${dur(wait)}.`:'Give it a moment before the next cheers.'); return}
+  if(kind==='cheers'&&!mugHolders()[Net.user.uid]){toast('Pour yourself some mulled wine first.'); return}
+  L[kind]=now;
+  const m=to&&to!==Net.user.uid?member(to):null;
+  Net.sendChat({kind,to:m?m.id:(kind==='pour'?Net.user.uid:''),toName:m?m.name:''});
+  if(kind==='log') toast('You added a log. The fire crackles.');
+  pourPick=false; renderHearth(); saveSoon();
+}
+function chatLine(cm){
+  const me=Net.user.uid, f=cm.from===me?'You':esc(cm.fromName);
+  if(cm.kind==='msg') return `<b>${f}</b> ${esc(cm.text)}`;
+  if(cm.kind==='log') return `<i>${f} added a log to the stove</i>`;
+  if(cm.kind==='pour') return cm.to&&cm.to!==cm.from?`<i>${f} poured mulled wine for ${cm.to===me?'you':esc(cm.toName)}</i>`:`<i>${f} poured a mug of mulled wine</i>`;
+  if(cm.kind==='cheers') return `<i>${f} raised a mug. Cheers!</i>`;
+  return '';
+}
+function renderHearth(){
+  if(!S) return;
+  const fl=fireLevel(), left=fireUntil()-Date.now(), ppl=hearthPresent().length;
+  $('#hearthStatus').textContent=(fl>0?`The fire burns for another ${dur(left)}. `:'The fire is out. ')+`${ppl} ${ppl===1?'person':'people'} by the stove.`+(fl>0?` Sitting here keeps you warm: +${Math.round(BAL.warmBonus*100)}% snow.`:'');
+  const ul=$('#chatList'), atBottom=ul.scrollHeight-ul.scrollTop-ul.clientHeight<40;
+  ul.innerHTML=CHAT.slice().reverse().map(cm=>`<li>${chatLine(cm)}<small>${ago(cm.at)}</small></li>`).join('')||'<li><i>It’s quiet. Say hello or add a log to the stove.</i></li>';
+  if(atBottom) ul.scrollTop=ul.scrollHeight;
+  const pp=$('#pourPick');
+  if(pourPick){
+    const opts=[{id:Net.user.uid,name:'Me'},...hearthPresent().filter(p=>!p.me),...Net.members.filter(m=>m.id!==Net.user.uid&&m.g&&!hearthPresent().some(p=>p.id===m.id))];
+    pp.innerHTML='<span class="small">Pour for:</span> '+opts.slice(0,12).map(o=>`<button class="sec" data-pour="${esc(o.id)}">${esc(o.name)}</button>`).join('');
+    pp.hidden=false;
+  } else pp.hidden=true;
+}
+function sendChatMsg(){
+  const inp=$('#chatIn'), text=inp.value.trim().slice(0,200); if(!text) return;
+  const now=Date.now(); S.lim.hearth=S.lim.hearth||{};
+  if(now-(S.lim.hearth.msg||0)<1500) return;
+  S.lim.hearth.msg=now; inp.value=''; Net.sendChat({kind:'msg',text});
+}
+function onChat(list){
+  const prevTop=CHAT[0]?CHAT[0].at:0;
+  CHAT=list||[];
+  const fresh=CHAT.filter(c=>c.at>prevTop&&c.from!==Net.user.uid);
+  if(prevTop&&fresh.length&&tab!=='hearth'){chatUnread+=fresh.length; updateChatBadge()}
+  for(const c of fresh) if(c.kind==='pour'&&c.to===Net.user.uid) toast(`${c.fromName} poured you a mug of mulled wine.`);
+  if(tab==='hearth') renderHearth();
+}
+function updateChatBadge(){const b=document.querySelector('[data-tab=hearth]'); if(b) b.textContent=chatUnread?`Hearth (${chatUnread})`:'Hearth'}
+let presenceAt=0;
+function hearthPresence(){
+  if(tab!=='hearth'||document.hidden) return;
+  if(Date.now()-presenceAt<30000) return;
+  presenceAt=Date.now(); Net.setPresence(presenceAt);
+}
+
 /* =========================================================
    GLOBE RENDERER
    ========================================================= */
@@ -2119,6 +2348,7 @@ function FireNet(){
       m.onSnapshot(m.query(ev,m.orderBy('at','desc'),m.limit(30)),snap=>{N.feed=snap.docs.map(d=>({id:d.id,...d.data()})); h.onFeed(N.feed)},e=>console.warn(e));
       m.onSnapshot(m.query(ev,m.where('to','==',N.user.uid),m.where('claimed','==',false)),snap=>{snap.docs.forEach(d=>h.onInbox({id:d.id,...d.data()}))},e=>console.warn(e));
       N.raidListen(h.onRaids);
+      N.chatListen(h.onChat);
     },
     publish(sum){return m.setDoc(m.doc(db,'clans',N.clan.id,'members',N.user.uid),sum,{merge:true}).catch(e=>console.warn(e))},
     setVisitor(uid,v){return m.updateDoc(m.doc(db,'clans',N.clan.id,'members',uid),{visitor:v}).catch(e=>console.warn(e))},
@@ -2128,14 +2358,17 @@ function FireNet(){
     createRaid(id,data){return m.setDoc(m.doc(db,'clans',N.clan.id,'raids',id),data)},
     hitsListen(id,cb){return m.onSnapshot(m.collection(db,'clans',N.clan.id,'raids',id,'hits'),snap=>{const o={}; snap.docs.forEach(d=>o[d.id]=d.data()); cb(o)},e=>console.warn(e))},
     writeHits(id,d){return m.setDoc(m.doc(db,'clans',N.clan.id,'raids',id,'hits',N.user.uid),d).catch(e=>console.warn(e))},
-    async getHits(id){const snap=await m.getDocs(m.collection(db,'clans',N.clan.id,'raids',id,'hits')); const o={}; snap.docs.forEach(d=>o[d.id]=d.data()); return o}
+    async getHits(id){const snap=await m.getDocs(m.collection(db,'clans',N.clan.id,'raids',id,'hits')); const o={}; snap.docs.forEach(d=>o[d.id]=d.data()); return o},
+    chatListen(cb){m.onSnapshot(m.query(m.collection(db,'clans',N.clan.id,'chat'),m.orderBy('at','desc'),m.limit(60)),snap=>cb(snap.docs.map(d=>({id:d.id,...d.data()}))),e=>console.warn(e))},
+    sendChat(d){return m.addDoc(m.collection(db,'clans',N.clan.id,'chat'),{kind:'msg',text:'',to:'',toName:'',...d,from:N.user.uid,fromName:N.user.name,at:Date.now()}).catch(e=>{console.warn(e); toast('Your message didn’t send. Check your connection.')})},
+    setPresence(at){return m.setDoc(m.doc(db,'clans',N.clan.id,'members',N.user.uid),{hearth:at},{merge:true}).catch(e=>console.warn(e))}
   };
   return N;
 }
 
 function DemoNet(){
   const KD='snowfall.demo';
-  let D, h, me={}, rcb=null, hcb=null;
+  let D, h, me={}, rcb=null, hcb=null, ccb=null;
   const persist=()=>{try{localStorage.setItem(KD,JSON.stringify(D))}catch(e){}};
   function makeMates(){
     const g=ITEM_KEYS.filter(k=>ITEMS[k].slot==='G'), sk=ITEM_KEYS.filter(k=>ITEMS[k].slot==='S');
@@ -2152,6 +2385,18 @@ function DemoNet(){
   const emitMembers=()=>{N.members=[{id:'me',name:N.user.name,...me,visitor:D.myVisitor||null},...D.mates.map(m=>({...m,at:Date.now()}))]; h&&h.onMembers(N.members)};
   function sim(){
     const nowR=Date.now();
+    if(nowR-(D.hearthAt||0)<75000){
+      const here=D.mates.slice(0,3);
+      here.forEach(mt=>mt.hearth=nowR);
+      if(Math.random()<0.045){
+        const mt=pick(here), r=Math.random(), push=d=>{D.chat.unshift({id:'c'+Math.random().toString(36).slice(2),kind:'msg',text:'',to:'',toName:'',...d,from:mt.id,fromName:mt.name,at:nowR}); D.chat.length=Math.min(D.chat.length,60); ccb&&ccb(D.chat.slice())};
+        const lines=['Brr, it’s freezing outside','Who wants more wine?','My snowman finally has a hat','Did anyone beat the Yeti yet?','Your globe is filthy, clean it','This fire is perfect','I just found blood rain. What.','The cat is watching me again','Add a log, it’s getting cold!','Egészségedre!','Who keeps shaking my globe?'];
+        if(r<0.55) push({kind:'msg',text:pick(lines)});
+        else if(r<0.7&&fireLevel()<0.5) push({kind:'log'});
+        else if(r<0.88){const tgt=pick([{id:N.user.uid,name:N.user.name},...here.map(x=>({id:x.id,name:x.name}))]); push({kind:'pour',to:tgt.id,toName:tgt.name})}
+        else push({kind:'cheers'});
+      }
+    }
     for(const r of (D.raids||[])){
       if(r.end<=nowR) continue; const H=D.raidHits[r.id]=D.raidHits[r.id]||{};
       D.mates.forEach((mt,i)=>{
@@ -2204,7 +2449,7 @@ function DemoNet(){
       D.clan={id,name:c.name,locked:c.locked}; D.mates=makeMates(); D.feed=[]; persist(); N.clan=D.clan; return D.clan;
     },
     async openClan(){N.clan=D.clan; return D.clan},
-    start(handlers){h=handlers; emitMembers(); h.onFeed(D.feed); N.raidListen(handlers.onRaids); setInterval(sim,1000)},
+    start(handlers){h=handlers; emitMembers(); h.onFeed(D.feed); N.raidListen(handlers.onRaids); N.chatListen(handlers.onChat); setInterval(sim,1000)},
     publish(sum){me=sum; emitMembers()},
     setVisitor(uid,v){const mt=D.mates.find(x=>x.id===uid); if(mt){mt.visitor=v; persist(); emitMembers()}},
     send(e){feedPush({...e,from:'me',fromName:N.user.name}); if(e.type==='nudge'){const mt=D.mates.find(x=>x.id===e.to); if(mt) mt.nudged=true}},
@@ -2213,7 +2458,10 @@ function DemoNet(){
     createRaid(id,data){D.raids=D.raids||[]; if(D.raids.some(r=>r.id===id)) return Promise.reject(new Error('exists')); D.raids.unshift({id,...data}); D.raids=D.raids.slice(0,6); D.raidHits[id]={}; persist(); rcb&&rcb(D.raids); return Promise.resolve()},
     hitsListen(id,cb){hcb={id,cb}; cb({...(D.raidHits[id]||{})}); return ()=>{hcb=null}},
     writeHits(id,d){(D.raidHits[id]=D.raidHits[id]||{})[N.user.uid]=d},
-    getHits(id){return Promise.resolve({...(D.raidHits[id]||{})})}
+    getHits(id){return Promise.resolve({...(D.raidHits[id]||{})})},
+    chatListen(cb){ccb=cb; D.chat=D.chat||[]; cb(D.chat.slice())},
+    sendChat(d){D.chat=D.chat||[]; D.chat.unshift({id:'c'+Math.random().toString(36).slice(2),kind:'msg',text:'',to:'',toName:'',...d,from:N.user.uid,fromName:N.user.name,at:Date.now()}); D.chat.length=Math.min(D.chat.length,60); persist(); ccb&&ccb(D.chat.slice())},
+    setPresence(at){D.hearthAt=at}
   };
   Object.defineProperty(N,'feed',{get(){return D?D.feed:[]}});
   return N;
@@ -2285,7 +2533,7 @@ function myVisitor(){
 function mult(){
   const g=S.globe;
   return (1+BAL.snowBonus*g.s)*(1+BAL.baseBonus*g.b)*(1+BAL.skyBonus*g.k)*(1+BAL.itemBonus*S.own.length)
-    *(1+BAL.glitterBonus*(S.glit.length-1))*(1+BAL.sealBonus*S.sealed.length)*(myVisitor()?1+BAL.visitBonus:1)*(1+goalBonus())*(1-BAL.crackPenalty*(S.globe.cr||0))*(1-BAL.dirtPenalty*(S.dirt||0))*(1+BAL.legacyBonus*(S.legacy||0));
+    *(1+BAL.glitterBonus*(S.glit.length-1))*(1+BAL.sealBonus*S.sealed.length)*(myVisitor()?1+BAL.visitBonus:1)*(1+goalBonus())*(1-BAL.crackPenalty*(S.globe.cr||0))*(1-BAL.dirtPenalty*(S.dirt||0))*(1+BAL.legacyBonus*(S.legacy||0))*(warmNow()?1+BAL.warmBonus:1);
 }
 function costScale(){return Math.pow(BAL.globeCostGrowth,(S.no||1)-1)}
 const partCostNow=i=>Math.round(BAL.partCost[i]*costScale()), snowCostNow=v=>Math.round(BAL.snowCost(v)*costScale()), baseCostNow=v=>Math.round(BAL.baseCost[v]*costScale()), skyCostNow=v=>Math.round(BAL.skyCost[v]*costScale());
@@ -2305,7 +2553,7 @@ addEventListener('pointermove',e=>{if(e.buttons) lastInput=Date.now()},{passive:
 const hourNow=()=>Math.floor(Date.now()/3600000);
 function activeMin(){S.act=S.act||{}; const h=hourNow(); let sec=0; for(const [k,v] of Object.entries(S.act)) if(+k>h-24) sec+=v; return sec/60}
 function trackActive(dt){
-  if(document.hidden||RS.open||Date.now()-lastInput>120000) return;
+  if(document.hidden||RS.open||tab==='hearth'||Date.now()-lastInput>120000) return;
   S.act=S.act||{}; const h=hourNow(); S.act[h]=(S.act[h]||0)+dt;
 }
 function breakLeft(){
@@ -2571,7 +2819,8 @@ function updateHud(force){
   if(S.dirt>0.4){$('#hint').textContent='Your glass is grimy. Drag back and forth across it to clean it'; $('#hint').classList.remove('gone')}
   else if(S.shook&&!S.globe.cr){$('#hint').classList.add('gone')}
   else if(S.globe.cr){$('#hint').textContent='Your glass is cracked. Keep tapping the globe to mend it'; $('#hint').classList.remove('gone')}
-  $('#gsub').textContent=`Globe no. ${S.no}, ${S.globe.p} of 8 parts`;
+  if(tab==='hearth'){$('#gname').textContent='The hearth'; $('#gsub').textContent=fireLevel()>0?'The stove is burning':'The stove has gone cold'; $('#hint').classList.add('gone')}
+  else {$('#gname').textContent=THEMES[S.globe.th].title; $('#gsub').textContent=`Globe no. ${S.no}, ${S.globe.p} of 8 parts`}
   const v=myVisitor();
   $('#gvis').textContent=[v?`A ${VISITORS[v.type].n} from ${v.fromName} is visiting, +20% snow for ${dur(v.until-Date.now())}`:'',S.blessUntil>Date.now()?`Clan goal reward, +25% snow for ${dur(S.blessUntil-Date.now())}`:S.partUntil>Date.now()?`Clan goal effort, +10% snow for ${dur(S.partUntil-Date.now())}`:'',OVER?`${sweatName(OVER)}: you’ve played ${Math.round(activeMin())} minutes today`:'',S.dizzyUntil>Date.now()?'Your globe is dizzy. Give it a moment':'',S.dirt>0.15?`Grimy glass, −${Math.round(S.dirt*BAL.dirtPenalty*100)}% snow`:'',S.globe.cr?`${S.globe.cr} ${S.globe.cr===1?'crack':'cracks'} in the glass, −${S.globe.cr*Math.round(BAL.crackPenalty*100)}% snow. Tap the globe to mend (${S.mend||0} of ${BAL.mendTaps})`:''].filter(Boolean).join('. ');
   document.querySelectorAll('[data-cost]').forEach(b=>{b.disabled=S.flakes<+b.dataset.cost});
@@ -2586,6 +2835,10 @@ function act(a,b){
   else if(a==='glitbuy'){const i=GLITTER.findIndex(x=>x.id===id), c=BAL.glitterCost[i-1]; if(i<1||S.glit.includes(id)||S.flakes<c) return; S.flakes-=c; S.glit.push(id); S.gl=id; mainView.swirl=1.3}
   else if(a==='offer'){const c=+b.dataset.cost; if(S.flakes<c||goalNow().prog.offer) return; S.flakes-=c; mainView.swirl=1.4; toast(`You offered ${fmt(c)} snow to the clan.`); goalTick('offer'); renderPanel(); saveSoon(); return}
   else if(a==='summon'){summonRaid(); return}
+  else if(a==='log'){hearthAct('log'); return}
+  else if(a==='pour'){pourPick=!pourPick; renderHearth(); return}
+  else if(a==='cheers'){hearthAct('cheers'); return}
+  else if(a==='say'){sendChatMsg(); return}
   else if(a==='joinraid'){openRaid(); return}
   else if(a==='nudge'){const m=member(id); dayCheck(); S.lim.nudges=S.lim.nudges||{}; if(!m||S.lim.nudges[id]===S.lim.day) return; S.lim.nudges[id]=S.lim.day; Net.send({type:'nudge',to:id,toName:m.name}); toast(`You nudged ${m.name} about the clan goal.`); renderGoal(); saveSoon(); return}
   else if(a==='csky'){if(!S.cursed.skies.includes(id)) return; g.cs=g.cs===id?null:id; mainView.swirl=1.3}
@@ -2619,14 +2872,18 @@ function postNote(){
   S.lim.noteAt=Date.now(); inp.value=''; Net.send({type:'note',text}); goalTick('note'); saveSoon();
 }
 $('#noteIn').addEventListener('keydown',e=>{if(e.key==='Enter') postNote()});
+$('#chatIn').addEventListener('keydown',e=>{if(e.key==='Enter') sendChatMsg()});
 document.querySelector('.drawer').addEventListener('click',e=>{
   const b=e.target.closest('[data-act]'); if(b&&!b.disabled) act(b.dataset.act,b);
   const tb=e.target.closest('[data-tab]'); if(tb) setTab(tb.dataset.tab);
+  const pb=e.target.closest('[data-pour]'); if(pb) hearthAct('pour',pb.dataset.pour);
 });
 function setTab(n){
   tab=n;
   document.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===n));
-  for(const p of ['parts','style','items','clan']) $('#pane-'+p).hidden=p!==n;
+  for(const p of ['parts','style','items','clan','hearth']) $('#pane-'+p).hidden=p!==n;
+  if(n==='hearth'){chatUnread=0; updateChatBadge(); presenceAt=0; pourPick=false; renderHearth(); setTimeout(()=>{const ul=$('#chatList'); ul.scrollTop=ul.scrollHeight},0)}
+  updateHud(true);
   if(n==='clan'){renderFeed(); renderGoal(); renderRaidBox()}
   if(n==='items') renderItems();
 }
@@ -2648,6 +2905,7 @@ const gcv=$('#globe'); let drag=null;
 gcv.addEventListener('pointerdown',e=>{
   if(!started) return;
   const r=gcv.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top;
+  if(tab==='hearth'){hearthTap(x,y); return}
   if(Math.hypot(x-G.cx,y-G.cy)<G.R*1.05||(Math.abs(x-G.cx)<G.R*0.9&&y>G.cy&&y<G.cy+G.R*1.25)){drag={x:e.clientX,y:e.clientY}; gcv.setPointerCapture(e.pointerId); shake(); mendTap()}
 });
 gcv.addEventListener('pointermove',e=>{if(!drag) return; const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.x=e.clientX; drag.y=e.clientY; const rc=gcv.getBoundingClientRect(); wipe(dx,dy,e.clientX-rc.left,e.clientY-rc.top); mainView.wobV+=dx*0.004; mainView.swirl=Math.min(1.6,mainView.swirl+Math.abs(dx)*0.006)});
@@ -2920,6 +3178,7 @@ async function enterGame(remoteSave,joined){
     onMembers:list=>{if(firstMembers){firstMembers(list);firstMembers=null} if(S&&tab==='items') renderItemsSoon(); if(S){goalSoon(); setTimeout(checkGoal,500)}},
     onFeed:()=>{if(S&&tab==='clan') renderFeed()},
     onRaids:list=>{lastRaidList=list; if(S) onRaids(list)},
+    onChat:list=>{lastChat=list; if(S) onChat(list)},
     onInbox:ev=>{if(S) onInbox(ev); else pendingInbox.push(ev)}
   });
   if(!save){
@@ -2934,6 +3193,7 @@ async function enterGame(remoteSave,joined){
   if(joined) Net.send({type:'join'});
   pendingInbox.splice(0).forEach(onInbox);
   if(lastRaidList) onRaids(lastRaidList);
+  if(lastChat) onChat(lastChat);
   $('#clanTitle').textContent=Net.clan.name;
   $('#clanInvite').textContent=Net.clan.locked?'New players find this clan in the list when they sign in, and need the clan password to join.':'New players can find and join this clan from the list when they sign in.';
   $('#gate').hidden=true; $('#app').hidden=false; started=true;
@@ -2943,10 +3203,10 @@ async function enterGame(remoteSave,joined){
   if(S.ended) startEnding(true);
   else if(S.isNew) openIntro(false);
 }
-const pendingInbox=[]; let lastRaidList=null;
+const pendingInbox=[]; let lastRaidList=null, lastChat=null;
 let itemsT=null; function renderItemsSoon(){clearTimeout(itemsT); itemsT=setTimeout(renderItems,400)}
 let goalT=null; function goalSoon(){clearTimeout(goalT); goalT=setTimeout(()=>{if(tab==='clan') renderGoal()},400)}
-setInterval(()=>{if(started){checkGoal(); processEndedRaids(); updateRaidBanner(); if(tab==='clan'){renderGoal(); renderRaidBox()}}},15000);
+setInterval(()=>{if(started){checkGoal(); processEndedRaids(); updateRaidBanner(); if(tab==='clan'){renderGoal(); renderRaidBox()} if(tab==='hearth') renderHearth()}},15000);
 
 let lastT=performance.now(), saveT=0, TH=0;
 function frame(now){
@@ -2954,7 +3214,7 @@ function frame(now){
   if(!started){ if(!$('#gate').hidden) drawGate(t,dt); requestAnimationFrame(frame); return }
   earn(rate()*dt);
   stepView(mainView,dt,flakeN(S.globe.s),t);
-  drawStage(t,dt);
+  if(tab==='hearth'){drawHearth(t,dt); hearthPresence()} else drawStage(t,dt);
   S.dirt=Math.min(1,(S.dirt||0)+dt/(BAL.dirtHours*3600));
   trackActive(dt); TH=(TH||0)+dt; if(TH>2){TH=0; updateTryhard()}
   if(END.on) drawEnding(t,dt);
