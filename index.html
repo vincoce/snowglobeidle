@@ -317,7 +317,7 @@ const BAL = {
   // the ending: the cat strikes when you seal this many globes
   finalSeal:10, legacyBonus:0.5,
   // playing a lot earns a playful label (no penalty): minutes of active play in the last 24 hours
-  sweatTiers:[[90,'Sweating'],[180,'Tryhard'],[300,'Touch grass']], pesterLimit:40, dizzyMinutes:10,
+  sweatTiers:[[90,'Sweating'],[180,'Tryhard'],[300,'Touch grass']], pesterLimit:40, dizzySeconds:12,
   goalTasks:3, goalBless:0.25, goalPartBless:0.10, goalBlessDays:7, goalOfferHours:2, goalSkipInactiveDays:14, nudgesPerMemberPerDay:1
 };
 
@@ -2487,7 +2487,7 @@ function fresh(members){
 function fix(s){
   s.globe.eq=s.globe.eq||{L:null,R:null,S:null}; s.lim=s.lim||{day:dayKey(),visits:0,gifts:0,shakes:{},noteAt:0};
   s.lim.shakes=s.lim.shakes||{}; s.claimed=s.claimed||[]; s.gifted=s.gifted||{}; s.glit=s.glit||['white']; s.gl=s.gl||'white';
-  s.cursed=s.cursed||makeCursed(); s.raidDone=s.raidDone||{}; s.firstAt=s.firstAt||Date.now(); s.dirt=s.dirt||0; s.legacy=s.legacy||0; s.lifeStart=s.lifeStart||s.firstAt;
+  s.cursed=s.cursed||makeCursed(); s.raidDone=s.raidDone||{}; s.firstAt=s.firstAt||Date.now(); s.dirt=s.dirt||0; if(s.dizzyUntil>Date.now()+BAL.dizzySeconds*1000) s.dizzyUntil=0; s.legacy=s.legacy||0; s.lifeStart=s.lifeStart||s.firstAt;
   s.pool=s.pool||[]; s.own=s.own||[]; s.sealed=s.sealed||[]; if(s.charges==null){s.charges=BAL.shakeMax;s.chargeAt=Date.now()}
   return s;
 }
@@ -2704,7 +2704,7 @@ function shake(){
   else if(!(S.globe.cr>0)){
     const n=Date.now(); pest=pest.filter(x=>n-x<600000); pest.push(n);
     if(pest.length>=BAL.pesterLimit&&!(S.dizzyUntil>n)){
-      S.dizzyUntil=n+BAL.dizzyMinutes*60000; pest=[];
+      S.dizzyUntil=n+BAL.dizzySeconds*1000; pest=[];
       toast('Whoa. Your globe is dizzy from all that shaking.'); saveSoon(); publish(true);
     }
   }
