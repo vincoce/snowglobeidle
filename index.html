@@ -3520,6 +3520,7 @@ function renderFeed(){
   $('#feed').innerHTML=list.length?list.map(e=>`<li>${feedLine(e)}<small>${ago(e.at)}</small></li>`).join(''):'<li>Nothing has happened yet. Shake a clanmate’s globe to start.</li>';
 }
 function renderPanel(){
+  CAB.dirty=true;
   renderParts(); renderStyle(); renderItems();
   $('#gname').textContent=THEMES[S.globe.th].title;
   updateHud(true);
@@ -3606,7 +3607,7 @@ function setTab(n){
   for(const p of ['parts','style','items','clan','hearth']) $('#pane-'+p).hidden=p!==n;
   if(n==='hearth'){chooseMove(); chatUnread=0; updateChatBadge(); presenceAt=0; pourPick=false; renderHearth(); setTimeout(()=>{const ul=$('#chatList'); ul.scrollTop=ul.scrollHeight},0)}
   updateHud(true);
-  if(n==='clan'){renderFeed(); renderGoal(); renderRaidBox()}
+  if(n==='clan'){CAB.dirty=true; renderFeed(); renderGoal(); renderRaidBox()} else CAB.sel=null;
   if(n==='items') renderItems();
 }
 
@@ -3640,7 +3641,9 @@ gcv.addEventListener('keydown',e=>{if(e.key===' '||e.key==='Enter'){e.preventDef
 const slots=[];
 $('#cab').addEventListener('click',e=>{
   const r=e.currentTarget.getBoundingClientRect(), x=e.clientX-r.left, y=e.clientY-r.top;
-  const s=slots.find(s=>x>=s.x&&x<s.x+s.w&&y>=s.y&&y<s.y+s.h); if(!s) return;
+  const s=slots.find(s=>x>=s.x&&x<s.x+s.w&&y>=s.y&&y<s.y+s.h);
+  CAB.sel=s&&s.id!==Net.user.uid?s.id:null; CAB.dirty=true;
+  if(!s) return;
   if(s.id===Net.user.uid){setTab('parts');return}
   if(s.id.startsWith('sealed:')) openSealed(+s.id.slice(7)); else if(s.id.startsWith('pin:')) openPinned(s.id.slice(4)); else if(s.id.startsWith('life:')) openLife(+s.id.slice(5)); else openMember(s.id);
 });
@@ -3780,6 +3783,26 @@ function plateText(c,x,y,txt,me){
   rr(c,x-w/2,y,w,13,3); c.fillStyle=lg(c,x-w/2,0,x+w/2,0,me?[[0,'#7d8fa8'],[0.45,'#e3ecf7'],[1,'#7d8fa8']]:[[0,'#8d6a28'],[0.45,'#f2d58c'],[1,'#8d6a28']]); c.fill();
   c.fillStyle='#2a1a0c'; c.textAlign='center'; c.textBaseline='middle'; c.fillText(txt,x,y+7);
 }
+/* The cabinet is drawn once as a still picture and only redrawn when something changes.
+   Only the globe you tapped is animated, so the page stays light with a full clan. */
+const CAB={dirty:true,sel:null,geom:null,cache:null,w:0};
+function cabGlobe(c,id,cx,cy,R,g,v,t,o,n){
+  if(id===CAB.sel){CAB.geom={cx,cy,R,g,v,o,n}; return}
+  if(!v.fl.length) stepView(v,0.016,n,t+Math.random());
+  drawGlobe(c,cx,cy,R,g,v,t,o);
+}
+function cabFrame(t,dt){
+  const cv=$('#cab'), W=cv.clientWidth; if(!W) return;
+  if(CAB.dirty||W!==CAB.w){
+    CAB.dirty=false; CAB.w=W; CAB.geom=null; drawCabinet(t,0);
+    if(!CAB.cache) CAB.cache=document.createElement('canvas');
+    CAB.cache.width=cv.width; CAB.cache.height=cv.height; CAB.cache.getContext('2d').drawImage(cv,0,0);
+  } else if(CAB.geom){const c=cv.getContext('2d'); c.setTransform(1,0,0,1,0,0); c.drawImage(CAB.cache,0,0)}
+  if(CAB.geom){
+    const d=Math.min(2,devicePixelRatio||1), c=cv.getContext('2d'), q=CAB.geom; c.setTransform(d,0,0,d,0,0);
+    stepView(q.v,dt,q.n,t); glow(c,q.cx,q.cy,q.R*1.5,'255,214,140',0.22); drawGlobe(c,q.cx,q.cy,q.R,q.g,q.v,t,q.o);
+  }
+}
 function drawCabinet(t,dt){
   const cv=$('#cab'), W=cv.clientWidth; if(!W) return;
   const mem=Net.members.filter(m=>m.g&&THEMES[m.g.th]);
@@ -3805,7 +3828,7 @@ function drawCabinet(t,dt){
     for(let r=0;r<rowsP;r++){shelf(c,W,y1+34+r*sh2+R2*2.22+6); shelfYs.push(y1+34+r*sh2+R2*2.22+6)}
     pins.forEach((pn,i)=>{
       const r=Math.floor(i/cols2), k=i%cols2, y0=y1+34+r*sh2, shelfY=y0+R2*2.22+6, cx=k*sw2+sw2/2, v=viewFor('pin:'+pn.id);
-      stepView(v,dt,Math.round(flakeN(pn.g.s)*0.4),t); drawGlobe(c,cx,shelfY-R2*1.2,R2,pn.g,v,t);
+      cabGlobe(c,'pin:'+pn.id,cx,shelfY-R2*1.2,R2,pn.g,v,t,{},flakeN(pn.g.s)*0.4);
       plateText(c,cx,shelfY+2,pn.name,pn.id===Net.user.uid);
       slots.push({x:k*sw2,y:y0,w:sw2,h:sh2,id:'pin:'+pn.id});
     });
@@ -3821,9 +3844,8 @@ function drawCabinet(t,dt){
     const r=Math.floor(i/cols), k=i%cols, y0=pad+r*sh, shelfY=y0+R*2.22+8, cx=k*sw+sw/2, isMe=m.id===Net.user.uid;
     const g=isMe?{...S.globe,gl:S.gl,dt:S.dirt,sweat:OVER,pl:pileOf(),pr:(S.presents||[]).length}:m.g, v=viewFor(m.id);
     if(g.dizzy&&!isMe){v.spin=1.5; v.swirl=Math.max(v.swirl,0.7)}
-    stepView(v,dt,Math.round(flakeN(g.s)*0.5),t);
     const vis=m.visitor&&m.visitor.until>Date.now()?m.visitor:null;
-    drawGlobe(c,cx,shelfY-R*1.2,R,g,v,t,{visitor:vis});
+    cabGlobe(c,m.id,cx,shelfY-R*1.2,R,g,v,t,{visitor:vis},flakeN(g.s)*0.5);
     plateText(c,cx,shelfY+2,(isMe?'You':m.name)+((isMe?S.legacy:m.legacy)?' ★'+(isMe?S.legacy:m.legacy):''),isMe);
     if(g.sweat){const lab=sweatName(g.sweat); c.font='700 10px "Nunito Sans", sans-serif'; const lw=c.measureText(lab).width+14;
       rr(c,cx-lw/2,shelfY-R*2.42-2,lw,15,7.5); c.fillStyle=['','#3a7bd5','#e0662b','#2f8a4a'][g.sweat]; c.fill();
@@ -3837,8 +3859,7 @@ function drawCabinet(t,dt){
     for(let r=0;r<rows2;r++) shelf(c,W,y1+34+r*sh2+R2*2.22+6);
     S.sealed.forEach((g,i)=>{
       const r=Math.floor(i/cols2), k=i%cols2, y0=y1+34+r*sh2, shelfY=y0+R2*2.22+6, cx=k*sw2+sw2/2, v=viewFor('sealed:'+i);
-      stepView(v,dt,Math.round(flakeN(g.s)*0.4),t);
-      drawGlobe(c,cx,shelfY-R2*1.2,R2,g,v,t);
+      cabGlobe(c,'sealed:'+i,cx,shelfY-R2*1.2,R2,g,v,t,{},flakeN(g.s)*0.4);
       slots.push({x:k*sw2,y:y0,w:sw2,h:sh2,id:'sealed:'+i});
     });
   }
@@ -3849,7 +3870,7 @@ function drawCabinet(t,dt){
     for(let r=0;r<rowsL;r++) shelf(c,W,y1+34+r*sh2+R2*2.22+6);
     lives.forEach((l,i)=>{
       const r=Math.floor(i/cols2), k=i%cols2, y0=y1+34+r*sh2, shelfY=y0+R2*2.22+6, cx=k*sw2+sw2/2, v=viewFor('life:'+i);
-      stepView(v,dt,Math.round(flakeN(l.g.s)*0.4),t); drawGlobe(c,cx,shelfY-R2*1.2,R2,l.g,v,t);
+      cabGlobe(c,'life:'+(S.lives||[]).indexOf(l),cx,shelfY-R2*1.2,R2,l.g,v,t,{},flakeN(l.g.s)*0.4);
       plateText(c,cx,shelfY+2,`Life ${l.life||i+1}`,false);
       slots.push({x:k*sw2,y:y0,w:sw2,h:sh2,id:'life:'+(S.lives||[]).indexOf(l)});
     });
@@ -3954,7 +3975,7 @@ async function enterGame(remoteSave,joined){
   let save=[remoteSave,local].filter(x=>x&&x.globe&&THEMES[x.globe.th]).sort((a,b)=>(b.last||0)-(a.last||0))[0]||null;
   const gotMembers=new Promise(res=>{firstMembers=res});
   Net.start({
-    onMembers:list=>{if(firstMembers){firstMembers(list);firstMembers=null} if(S&&tab==='items') renderItemsSoon(); if(S){goalSoon(); setTimeout(checkGoal,500)}},
+    onMembers:list=>{CAB.dirty=true; if(firstMembers){firstMembers(list);firstMembers=null} if(S&&tab==='items') renderItemsSoon(); if(S){goalSoon(); setTimeout(checkGoal,500)}},
     onFeed:()=>{if(S&&tab==='clan') renderFeed()},
     onRaids:list=>{lastRaidList=list; if(S) onRaids(list)},
     onChat:list=>{lastChat=list; if(S) onChat(list)},
@@ -3985,7 +4006,7 @@ async function enterGame(remoteSave,joined){
 const pendingInbox=[]; let lastRaidList=null, lastChat=null;
 let itemsT=null; function renderItemsSoon(){clearTimeout(itemsT); itemsT=setTimeout(renderItems,400)}
 let goalT=null; function goalSoon(){clearTimeout(goalT); goalT=setTimeout(()=>{if(tab==='clan') renderGoal()},400)}
-setInterval(()=>{if(started){checkGoal(); processEndedRaids(); updateRaidBanner(); if(tab==='clan'){renderGoal(); renderRaidBox()} if(tab==='hearth') renderHearth()}},15000);
+setInterval(()=>{if(started){if(tab==='clan') CAB.dirty=true; checkGoal(); processEndedRaids(); updateRaidBanner(); if(tab==='clan'){renderGoal(); renderRaidBox()} if(tab==='hearth') renderHearth()}},15000);
 
 let lastT=performance.now(), saveT=0, TH=0, earnAt=Date.now();
 function frame(now){
@@ -4000,7 +4021,7 @@ function frame(now){
   trackActive(dt); TH=(TH||0)+dt; if(TH>2){TH=0; updateTryhard()}
   if(END.on) drawEnding(t,dt);
   if(RS.open){raidStep(dt); drawRaid(t,dt)}
-  if(tab==='clan'&&!RS.open) drawCabinet(t,dt);
+  if(tab==='clan'&&!RS.open) cabFrame(t,dt);
   if(ov) drawOverlay(t,dt);
   if(ov&&ov.mode==='member') for(const m of Net.members) if(m.id===ov.id) stepView(ov.v,dt,Math.round(flakeN(m.g.s)*0.7),t);
   updateHud(false);
